@@ -142,10 +142,10 @@ object Store {
         val uid = first.str("userId") ?: cfg.str("userId") ?: ""
         val url = (cfg.str("serverUrl") ?: "").trimEnd('/')
         if (token.isEmpty() || uid.isEmpty() || url.isEmpty()) return
-        setServer(MediaServer(cfg.str("name") ?: "Jellyfin", url, uid, token, cfg.str("username") ?: ""))
+        saveServer(MediaServer(cfg.str("name") ?: "Jellyfin", url, uid, token, cfg.str("username") ?: ""))
     }
 
-    fun setServer(s: MediaServer?) {
+    fun saveServer(s: MediaServer?) {
         server = s
         val e = EttyFlixApp.prefs.edit()
         if (s != null) e.putString("jf_server", AppJson.encodeToString(MediaServer.serializer(), s)) else e.remove("jf_server")
