@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.lorenzo.ettyflix"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.lorenzo.ettyflix"
@@ -59,8 +59,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
+    implementation("androidx.media3:media3-exoplayer:1.5.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.5.0")
+    implementation("androidx.media3:media3-ui:1.5.0")
+    implementation("androidx.media3:media3-datasource-okhttp:1.5.0")
+    // decoder audio extra (DTS, TrueHD…) per i file che la Fire Stick non sa leggere da sola
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
 }
