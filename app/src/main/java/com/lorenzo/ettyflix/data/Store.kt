@@ -344,6 +344,21 @@ object WatchProgress {
         Trakt.pushWatched(changed, watched)
     }
 
+    /** Segna (o toglie) come visti tutti gli episodi usciti di tutte le stagioni. */
+    suspend fun setSeries(m: MediaItem, watched: Boolean) {
+        if (!watched) {
+            val removed = entries.values.filter { it.tmdbID == m.tmdbID }
+            if (removed.isEmpty()) return
+            removed.forEach { entries.remove(it.id) }
+            save()
+            Trakt.pushWatched(removed, false)
+            return
+        }
+        val seasons = TMDB.get("tv/${m.tmdbID}")?.arr("seasons")?.mapNotNull { it.int("season_number") }?.filter { it > 0 } ?: return
+        val all = seasons.flatMap { TMDB.episodes(m.tmdbID, it) }
+        if (all.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { setSeason(m, all, true) }
+    }
+
     fun removeFromContinue(e: WatchEntry) {
         hiddenFromContinue = hiddenFromContinue + e.tmdbID
         save()

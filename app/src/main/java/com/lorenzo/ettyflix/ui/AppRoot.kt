@@ -59,6 +59,7 @@ import com.lorenzo.ettyflix.data.WatchProgress
 import com.lorenzo.ettyflix.player.LivePlayerScreen
 import com.lorenzo.ettyflix.player.PlayerScreen
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -236,6 +237,16 @@ private fun MediaMenu(req: MenuReq) {
                 if (req.showOpen) PillButton("Apri", modifier = m()) { close(); Nav.push(Screen.Detail(item)) }
                 PillButton(if (Store.inWatchlist(item)) "Togli dalla watchlist" else "Aggiungi alla watchlist", modifier = m()) {
                     Store.toggleWatchlist(item); close()
+                }
+                if (item.mediaType == "tv") {
+                    PillButton("Segna serie come vista", modifier = m()) {
+                        close(); com.lorenzo.ettyflix.data.Trakt.scope.launch { WatchProgress.setSeries(item, true) }
+                    }
+                    if (WatchProgress.entries.values.any { it.tmdbID == item.tmdbID }) {
+                        PillButton("Segna serie come non vista", modifier = m()) {
+                            close(); com.lorenzo.ettyflix.data.Trakt.scope.launch { WatchProgress.setSeries(item, false) }
+                        }
+                    }
                 }
                 if (item.mediaType == "movie") {
                     val watched = WatchProgress.isWatched(item.tmdbID, "movie")
