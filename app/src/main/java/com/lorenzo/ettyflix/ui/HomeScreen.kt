@@ -125,15 +125,14 @@ fun HomeScreen() {
             }
         }
         item(key = "continue") { ContinueRow() }
+        shelves.firstOrNull { it.kind == "liveTVFavorites" }?.let { fav -> item(key = "fav-ch") { FavoriteChannelsRow(fav.title) } }
         if (Store.hasKey) {
             item(key = "ai-movie") { AIRow("movie") }
             if (topTV.isNotEmpty()) item(key = "top-tv") { Top10Row("Top 10 serie della settimana", topTV) }
             item(key = "ai-tv") { AIRow("tv") }
             if (topMovies.isNotEmpty()) item(key = "top-mv") { Top10Row("Top 10 film della settimana", topMovies) }
         }
-        items(shelves, key = { "sh-" + it.id }) { sh ->
-            if (sh.kind == "liveTVFavorites") FavoriteChannelsRow(sh.title) else TileShelf(sh)
-        }
+        items(shelves.filter { it.kind != "liveTVFavorites" }, key = { "sh-" + it.id }) { sh -> TileShelf(sh) }
     }
 }
 
