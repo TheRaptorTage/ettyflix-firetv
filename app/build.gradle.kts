@@ -63,6 +63,4 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
-    // decoder audio extra (DTS, TrueHD…) per i file che la Fire Stick non sa leggere da sola
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.4.1+1")
 }
