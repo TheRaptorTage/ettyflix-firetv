@@ -57,23 +57,30 @@ object ConfigReceiver {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun start() {
-        val ip = localIPAddress()
-        address = ip?.let { "http://$it:${ShareCode.port}" } ?: "Rete non disponibile"
-        code = ip?.let { ShareCode.encode(it) } ?: "—"
-        if (server != null) return
-        try {
-            val s = ServerSocket(ShareCode.port)
-            s.reuseAddress = true
-            server = s
-            running = true
-            scope.launch {
-                while (!s.isClosed) {
-                    val c = runCatching { s.accept() }.getOrNull() ?: break
-                    launch { handle(c) }
+        scope.launch {
+            val ip = localIPAddress()
+            withContext(Dispatchers.Main) {
+                address = ip?.let { "http://$it:${ShareCode.port}" } ?: "Rete non disponibile"
+                code = ip?.let { ShareCode.encode(it) } ?: "—"
+            }
+            synchronized(this@ConfigReceiver) {
+                if (server != null) return@launch
+                try {
+                    val s = ServerSocket()
+                    s.reuseAddress = true
+                    s.bind(java.net.InetSocketAddress(ShareCode.port))
+                    server = s
+                    launch { withContext(Dispatchers.Main) { running = true } }
+                    launch {
+                        while (!s.isClosed) {
+                            val c = runCatching { s.accept() }.getOrNull() ?: break
+                            launch { handle(c) }
+                        }
+                    }
+                } catch (e: Exception) {
+                    launch { withContext(Dispatchers.Main) { message = "Impossibile avviare la ricezione: ${e.message}" } }
                 }
             }
-        } catch (e: Exception) {
-            message = "Impossibile avviare la ricezione: ${e.message}"
         }
     }
 
