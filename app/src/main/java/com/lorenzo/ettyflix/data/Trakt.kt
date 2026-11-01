@@ -139,10 +139,13 @@ object Trakt {
         status = "Inserisci il codice sul sito di Trakt."
         var interval = (j.int("interval") ?: 5).toLong()
         val deadline = System.currentTimeMillis() + (j.int("expires_in") ?: 600) * 1000L
+        var variant = 0
+        val other = authHosts.firstOrNull { it != authBase } ?: authBase
         while (System.currentTimeMillis() < deadline && scope.isActive) {
             delay(interval * 1000)
-            val body = JSONObject().put("code", device).put("client_id", clientID).put("code_verifier", verifier)
-            val r = send("/oauth/device/token", "POST", body, host = authBase)
+            val body = JSONObject().put("code", device).put("client_id", clientID)
+            if (variant != 1) body.put("code_verifier", verifier)
+            val r = send("/oauth/device/token", "POST", body, host = if (variant == 2) other else authBase)
             when (r.code) {
                 200 -> {
                     r.json()?.let { storeTokens(it) }
@@ -158,7 +161,12 @@ object Trakt {
                 400 -> continue
                 429 -> interval += 1
                 0 -> continue
-                else -> { userCode = null; status = if (r.code == 418) "Accesso rifiutato su Trakt." else "Codice scaduto o non valido: riprova."; return }
+                else -> {
+                    if (variant < 2) { variant++; continue }
+                    userCode = null
+                    status = "Accesso non riuscito (errore ${r.code}: ${r.body.take(120)}). Riprova."
+                    return
+                }
             }
         }
         userCode = null
