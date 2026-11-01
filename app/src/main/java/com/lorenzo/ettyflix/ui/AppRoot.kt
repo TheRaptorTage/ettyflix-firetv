@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -92,12 +93,27 @@ fun AppRoot(onExit: () -> Unit) {
                 else -> onExit()
             }
         }
+        // Quando si apre una pagina nuova (o si chiude un menu) il cursore va sulla pagina,
+        // non sul menu laterale: se la pagina non lo prende da sola, lo porto io sul primo elemento.
+        val contentFocus = remember { FocusRequester() }
+        var contentHasFocus by remember { mutableStateOf(false) }
+        LaunchedEffect(top, Nav.menu == null) {
+            if (Nav.menu != null) return@LaunchedEffect
+            repeat(12) {
+                delay(90)
+                if (contentHasFocus) return@LaunchedEffect
+                runCatching { contentFocus.requestFocus() }
+            }
+        }
+        val contentModifier = Modifier.fillMaxSize().focusRequester(contentFocus).onFocusChanged { contentHasFocus = it.hasFocus }.focusGroup()
         if (top.fullScreen) {
-            holder.SaveableStateProvider(Nav.stack.size.toString() + top.toString().take(80)) { ScreenContent(top) }
+            Box(contentModifier) {
+                holder.SaveableStateProvider(Nav.stack.size.toString() + top.toString().take(80)) { ScreenContent(top) }
+            }
         } else {
             Row(Modifier.fillMaxSize()) {
                 Sidebar()
-                Box(Modifier.fillMaxSize()) {
+                Box(contentModifier) {
                     holder.SaveableStateProvider(Nav.stack.size.toString() + top.toString().take(80)) { ScreenContent(top) }
                 }
             }
