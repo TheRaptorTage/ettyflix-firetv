@@ -214,31 +214,38 @@ fun Clock(modifier: Modifier = Modifier, size: Int = 15) {
     }
 }
 
-// MARK: Menu di un titolo (tasto ☰)
+// MARK: Menu di un elemento (OK tenuto premuto)
 
 @Composable
-private fun MediaMenu(item: com.lorenzo.ettyflix.data.MediaItem) {
+private fun MediaMenu(req: MenuReq) {
     val first = remember { FocusRequester() }
+    val item = req.item
+    fun close() { Nav.menu = null }
     Box(Modifier.fillMaxSize().background(Color(0xB3000000)), contentAlignment = Alignment.Center) {
         Column(
             Modifier.width(380.dp).background(C.panel, RoundedCornerShape(20.dp))
                 .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp)).padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(item.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+            Text(req.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2)
             Spacer(Modifier.height(4.dp))
-            PillButton("Apri", modifier = Modifier.focusRequester(first)) { Nav.menu = null; Nav.push(Screen.Detail(item)) }
-            PillButton(if (Store.inWatchlist(item)) "Togli dalla watchlist" else "Aggiungi alla watchlist") {
-                Store.toggleWatchlist(item); Nav.menu = null
-            }
-            if (item.mediaType == "movie") {
-                val watched = WatchProgress.isWatched(item.tmdbID, "movie")
-                PillButton(if (watched) "Segna come non visto" else "Segna come visto") {
-                    WatchProgress.setWatched(item, null, null, !watched); Nav.menu = null
+            var firstUsed = false
+            fun m(): Modifier = if (!firstUsed) { firstUsed = true; Modifier.focusRequester(first) } else Modifier
+            req.extra.forEach { (label, action) -> PillButton(label, modifier = m()) { close(); action() } }
+            if (item != null) {
+                if (req.showOpen) PillButton("Apri", modifier = m()) { close(); Nav.push(Screen.Detail(item)) }
+                PillButton(if (Store.inWatchlist(item)) "Togli dalla watchlist" else "Aggiungi alla watchlist", modifier = m()) {
+                    Store.toggleWatchlist(item); close()
+                }
+                if (item.mediaType == "movie") {
+                    val watched = WatchProgress.isWatched(item.tmdbID, "movie")
+                    PillButton(if (watched) "Segna come non visto" else "Segna come visto", modifier = m()) {
+                        WatchProgress.setWatched(item, null, null, !watched); close()
+                    }
                 }
             }
-            PillButton("Chiudi") { Nav.menu = null }
+            PillButton("Chiudi", modifier = m()) { close() }
         }
     }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(80); runCatching { first.requestFocus() } }
 }

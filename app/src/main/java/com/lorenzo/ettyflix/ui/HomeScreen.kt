@@ -247,7 +247,9 @@ fun ContinueCard(t: ContinueTarget) {
             onClick = {
                 Nav.play(PlayRequest(e.media, t.season, t.episode, t.episodeTitle, t.stillPath, e.logoPath, null, t.startAt))
             },
-            onMenu = { WatchProgress.removeFromContinue(e) },
+            onMenu = {
+                Nav.menu = MenuReq(e.title, e.media, listOf("Togli da Continua a guardare" to { WatchProgress.removeFromContinue(e) }))
+            },
             modifier = Modifier.width(250.dp).height(141.dp)
         ) {
             Box(Modifier.fillMaxSize().background(C.panel)) {
@@ -297,7 +299,7 @@ private fun AIRow(type: String) {
 private fun Top10Row(title: String, items: List<MediaItem>) {
     MediaRow(title) {
         itemsIndexed(items, key = { _, m -> m.id }) { i, m ->
-            FocusBox(onClick = { Nav.push(Screen.Detail(m)) }, onMenu = { Nav.menu = m }, modifier = Modifier.width(130.dp).height(195.dp)) {
+            FocusBox(onClick = { Nav.push(Screen.Detail(m)) }, onMenu = { Nav.menu = MenuReq(m) }, modifier = Modifier.width(130.dp).height(195.dp)) {
                 Box(Modifier.fillMaxSize().background(C.panel)) {
                     Img(TMDBImage.url(m.posterPath, "w342"), Modifier.fillMaxSize())
                     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color(0x59000000), 0.25f to Color.Transparent,

@@ -32,10 +32,20 @@ sealed class Screen {
     val fullScreen: Boolean get() = this is Player || this is LivePlayer || this is Sources
 }
 
+/** Menu di un elemento (OK tenuto premuto o tasto ☰). */
+data class MenuReq(
+    val title: String,
+    val item: MediaItem? = null,
+    val extra: List<Pair<String, () -> Unit>> = emptyList(),
+    val showOpen: Boolean = true
+) {
+    constructor(item: MediaItem) : this(item.title, item)
+}
+
 object Nav {
     val stack = mutableStateListOf<Screen>(Screen.Home)
     /** titolo per cui è aperto il menu (tasto ☰) */
-    var menu by mutableStateOf<MediaItem?>(null)
+    var menu by mutableStateOf<MenuReq?>(null)
 
     val top: Screen get() = stack.last()
     val tab: Screen get() = stack.first()

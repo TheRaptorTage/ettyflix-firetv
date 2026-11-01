@@ -328,7 +328,7 @@ fun LiveScreen() {
         LazyColumn(Modifier.weight(1f).fillMaxHeight(), contentPadding = PaddingValues(start = 10.dp, end = 30.dp, top = 40.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (list.isEmpty()) item {
-                Text(if (LiveTV.loading) LiveTV.status else if (group == "★ Preferiti") "Nessun canale preferito: premi ☰ su un canale per aggiungerlo."
+                Text(if (LiveTV.loading) LiveTV.status else if (group == "★ Preferiti") "Nessun canale preferito: tieni premuto OK su un canale per aggiungerlo."
                      else "Nessun canale.", color = C.dim, fontSize = 14.sp)
             }
             items(list, key = { it.id }) { c -> ChannelRow(c) }
@@ -355,7 +355,12 @@ private fun ChannelRow(c: LiveChannel) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
         .background(if (f) Color(0xFF3A3F4B) else Color(0xFF1C2028))
         .border(if (f) 2.dp else 0.dp, if (f) Color.White else Color.Transparent, RoundedCornerShape(12.dp))
-        .onMenuKey { LiveTV.toggleFavorite(c) }
+        .onMenuKey {
+            Nav.menu = MenuReq(c.name, null, listOf(
+                "Guarda" to { Nav.push(Screen.LivePlayer(c)) },
+                (if (LiveTV.isFavorite(c)) "Togli dai preferiti" else "Aggiungi ai preferiti") to { LiveTV.toggleFavorite(c) }
+            ))
+        }
         .clickable(interactionSource = src, indication = null) { Nav.push(Screen.LivePlayer(c)) }
         .padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(80.dp, 48.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2A2F3A)).padding(4.dp), contentAlignment = Alignment.Center) {

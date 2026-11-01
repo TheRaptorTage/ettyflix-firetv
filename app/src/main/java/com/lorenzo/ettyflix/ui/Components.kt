@@ -35,6 +35,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -71,9 +74,22 @@ object C {
     val pad = 48.dp
 }
 
-/** Tasto "menu" (☰) del telecomando: apre il menu del titolo. */
-fun Modifier.onMenuKey(action: () -> Unit): Modifier = onPreviewKeyEvent {
-    if (it.type == KeyEventType.KeyDown && it.key == Key.Menu) { action(); true } else false
+/** OK tenuto premuto (o tasto ☰ del telecomando): apre il menu dell'elemento. */
+fun Modifier.onMenuKey(action: () -> Unit): Modifier = composed {
+    var longPressed by remember { mutableStateOf(false) }
+    onPreviewKeyEvent {
+        val n = it.nativeKeyEvent
+        val ok = n.keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || n.keyCode == android.view.KeyEvent.KEYCODE_ENTER
+        when {
+            it.type == KeyEventType.KeyDown && it.key == Key.Menu -> { action(); true }
+            ok && it.type == KeyEventType.KeyDown && n.repeatCount > 0 -> {
+                if (!longPressed && n.repeatCount >= 2) { longPressed = true; action() }
+                true   // finché tengo premuto non parte il clic normale
+            }
+            ok && it.type == KeyEventType.KeyUp && longPressed -> { longPressed = false; true }
+            else -> false
+        }
+    }
 }
 
 /** Elemento selezionabile col telecomando: si ingrandisce e ha il bordo bianco quando è selezionato. */
@@ -165,7 +181,7 @@ fun PosterCard(item: MediaItem, width: Dp = 130.dp, showTitle: Boolean = false, 
     Column(Modifier.width(width)) {
         FocusBox(
             onClick = { Nav.push(Screen.Detail(item)) },
-            onMenu = { Nav.menu = item },
+            onMenu = { Nav.menu = MenuReq(item) },
             onFocus = onFocus,
             modifier = Modifier.width(width).height(width * 1.5f)
         ) {

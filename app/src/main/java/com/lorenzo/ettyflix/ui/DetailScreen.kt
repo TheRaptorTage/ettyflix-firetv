@@ -269,7 +269,12 @@ private fun EpisodeCard(show: MediaItem, ep: Episode, future: Boolean, onClick: 
     Column(Modifier.width(250.dp)) {
         FocusBox(
             onClick = onClick,
-            onMenu = { WatchProgress.setWatched(show, ep.season, ep, !watched) },
+            onMenu = {
+                Nav.menu = MenuReq("E${ep.number} · ${ep.name}", null, listOf(
+                    "Riproduci" to onClick,
+                    (if (watched) "Segna come non visto" else "Segna come visto") to { WatchProgress.setWatched(show, ep.season, ep, !watched) }
+                ))
+            },
             modifier = Modifier.width(250.dp).height(141.dp)
         ) {
             Box(Modifier.fillMaxSize().background(C.panel)) {
