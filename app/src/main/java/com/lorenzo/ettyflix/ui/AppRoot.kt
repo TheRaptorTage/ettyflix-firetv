@@ -1,0 +1,228 @@
+package com.lorenzo.ettyflix.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.lorenzo.ettyflix.data.LiveTV
+import com.lorenzo.ettyflix.data.Profiles
+import com.lorenzo.ettyflix.data.Store
+import com.lorenzo.ettyflix.data.Trakt
+import com.lorenzo.ettyflix.data.WatchProgress
+import com.lorenzo.ettyflix.player.LivePlayerScreen
+import com.lorenzo.ettyflix.player.PlayerScreen
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@Composable
+fun AppRoot(onExit: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(C.bg)) {
+        if (!Profiles.chosen) {
+            ProfileScreen()
+            return@Box
+        }
+        LaunchedEffect(Store.reloadToken) {
+            runCatching { Store.bootstrap() }
+            runCatching { LiveTV.loadIfNeeded() }
+        }
+        // Ogni minuto controlla se su Trakt è cambiato qualcosa (es. hai visto qualcosa sul Mac)
+        LaunchedEffect(Profiles.currentID) {
+            if (Trakt.isLoggedIn) runCatching { Trakt.syncAll() }
+            while (true) {
+                delay(60_000)
+                if (!Nav.top.fullScreen) runCatching { Trakt.quickSync() }
+            }
+        }
+
+        val holder = rememberSaveableStateHolder()
+        val top = Nav.top
+        BackHandler {
+            when {
+                Nav.menu != null -> Nav.menu = null
+                Nav.pop() -> {}
+                Nav.tab != Screen.Home -> Nav.selectTab(Screen.Home)
+                else -> onExit()
+            }
+        }
+        if (top.fullScreen) {
+            holder.SaveableStateProvider(Nav.stack.size.toString() + top.toString().take(80)) { ScreenContent(top) }
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                Sidebar()
+                Box(Modifier.fillMaxSize()) {
+                    holder.SaveableStateProvider(Nav.stack.size.toString() + top.toString().take(80)) { ScreenContent(top) }
+                }
+            }
+        }
+        Nav.menu?.let { MediaMenu(it) }
+    }
+}
+
+@Composable
+private fun ScreenContent(s: Screen) {
+    when (s) {
+        Screen.Home -> HomeScreen()
+        Screen.Search -> SearchScreen()
+        Screen.Library -> LibraryScreen()
+        Screen.Live -> LiveScreen()
+        Screen.Settings -> SettingsScreen()
+        is Screen.Detail -> DetailScreen(s.item)
+        is Screen.TilePage -> TilePageScreen(s.tile)
+        is Screen.Grid -> GridScreen(s.title, s.sources, s.items)
+        is Screen.Person -> PersonScreen(s.id, s.name)
+        is Screen.Recommended -> RecommendedScreen(s.type)
+        is Screen.Sources -> SourcesScreen(s.req)
+        is Screen.Player -> PlayerScreen(s.req, s.sources, s.selected)
+        is Screen.LivePlayer -> LivePlayerScreen(s.channel)
+    }
+}
+
+// MARK: Menu laterale
+
+@Composable
+private fun Sidebar() {
+    var expanded by remember { mutableStateOf(false) }
+    val p = Profiles.current
+    Column(
+        Modifier
+            .fillMaxHeight()
+            .width(if (expanded) 210.dp else 64.dp)
+            .animateContentSize()
+            .background(
+                if (expanded) Brush.horizontalGradient(listOf(Color(0xF0101318), Color(0xD9101318)))
+                else Brush.horizontalGradient(listOf(Color(0xCC0B0D11), Color(0x990B0D11)))
+            )
+            .onFocusChanged { expanded = it.hasFocus }
+            .padding(vertical = 22.dp, horizontal = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        SideItem(null, p.name, expanded, avatar = p.color, initial = p.name.take(1)) {
+            Profiles.chosen = false
+        }
+        Spacer(Modifier.height(10.dp))
+        SideItem(Icons.Filled.Search, "Cerca", expanded, selected = Nav.tab == Screen.Search) { Nav.selectTab(Screen.Search) }
+        SideItem(Icons.Filled.Home, "Home", expanded, selected = Nav.tab == Screen.Home) { Nav.selectTab(Screen.Home) }
+        SideItem(Icons.Filled.VideoLibrary, "Libreria", expanded, selected = Nav.tab == Screen.Library) { Nav.selectTab(Screen.Library) }
+        SideItem(Icons.Filled.LiveTv, "TV in diretta", expanded, selected = Nav.tab == Screen.Live) { Nav.selectTab(Screen.Live) }
+        SideItem(Icons.Filled.Settings, "Impostazioni", expanded, selected = Nav.tab == Screen.Settings) { Nav.selectTab(Screen.Settings) }
+        Spacer(Modifier.weight(1f))
+        if (expanded) Clock(Modifier.padding(start = 10.dp))
+    }
+}
+
+@Composable
+private fun SideItem(icon: ImageVector?, label: String, expanded: Boolean, selected: Boolean = false,
+                     avatar: Int? = null, initial: String = "", onClick: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val focused by src.collectIsFocusedAsState()
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (focused) Color.White else if (selected) Color(0x26FFFFFF) else Color.Transparent)
+            .clickable(interactionSource = src, indication = null, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (avatar != null) {
+            val (a, b) = Profiles.palette[avatar.coerceIn(0, Profiles.palette.lastIndex)]
+            Box(Modifier.size(26.dp).background(Brush.linearGradient(listOf(Color(a), Color(b))), CircleShape)
+                .border(1.dp, Color(0x55FFFFFF), CircleShape), contentAlignment = Alignment.Center) {
+                Text(initial, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        } else if (icon != null) {
+            Icon(icon, null, tint = if (focused) Color.Black else Color.White, modifier = Modifier.size(24.dp))
+        }
+        AnimatedVisibility(expanded, enter = fadeIn(), exit = fadeOut()) {
+            Text(label, color = if (focused) Color.Black else Color.White, fontSize = 16.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.padding(start = 14.dp), maxLines = 1)
+        }
+    }
+}
+
+@Composable
+fun Clock(modifier: Modifier = Modifier, size: Int = 15) {
+    var now by remember { mutableStateOf(Date()) }
+    LaunchedEffect(Unit) { while (true) { now = Date(); delay(15_000) } }
+    Column(modifier) {
+        Text(SimpleDateFormat("HH:mm", Locale.ITALIAN).format(now), color = Color.White, fontSize = (size + 5).sp, fontWeight = FontWeight.SemiBold)
+        Text(SimpleDateFormat("EEEE d MMMM", Locale.ITALIAN).format(now).replaceFirstChar { it.uppercase() },
+            color = C.dim, fontSize = size.sp)
+    }
+}
+
+// MARK: Menu di un titolo (tasto ☰)
+
+@Composable
+private fun MediaMenu(item: com.lorenzo.ettyflix.data.MediaItem) {
+    val first = remember { FocusRequester() }
+    Box(Modifier.fillMaxSize().background(Color(0xB3000000)), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.width(380.dp).background(C.panel, RoundedCornerShape(20.dp))
+                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp)).padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(item.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+            Spacer(Modifier.height(4.dp))
+            PillButton("Apri", modifier = Modifier.focusRequester(first)) { Nav.menu = null; Nav.push(Screen.Detail(item)) }
+            PillButton(if (Store.inWatchlist(item)) "Togli dalla watchlist" else "Aggiungi alla watchlist") {
+                Store.toggleWatchlist(item); Nav.menu = null
+            }
+            if (item.mediaType == "movie") {
+                val watched = WatchProgress.isWatched(item.tmdbID, "movie")
+                PillButton(if (watched) "Segna come non visto" else "Segna come visto") {
+                    WatchProgress.setWatched(item, null, null, !watched); Nav.menu = null
+                }
+            }
+            PillButton("Chiudi") { Nav.menu = null }
+        }
+    }
+    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+}
