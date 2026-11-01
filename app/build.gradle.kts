@@ -22,9 +22,9 @@ android {
             val ks = file("ettyflix.keystore")
             if (ks.exists()) {
                 storeFile = ks
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "ettyflix"
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "ML5g9iQWvoOo5ulfrnvZZWXf"
                 keyAlias = "ettyflix"
-                keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: "ettyflix"
+                keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: "ML5g9iQWvoOo5ulfrnvZZWXf"
             }
         }
     }
