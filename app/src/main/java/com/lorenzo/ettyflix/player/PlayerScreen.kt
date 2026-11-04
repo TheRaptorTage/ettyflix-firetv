@@ -117,7 +117,7 @@ fun buildPlayer(ctx: Context): ExoPlayer {
     val http = DefaultHttpDataSource.Factory()
         .setAllowCrossProtocolRedirects(true)
         .setUserAgent("EttyFlix/1.0 (Fire TV)")
-        .setConnectTimeoutMs(20_000).setReadTimeoutMs(30_000)
+        .setConnectTimeoutMs(30_000).setReadTimeoutMs(90_000)   // il debrid può impiegare fino a un minuto a preparare il file
     val renderers = DefaultRenderersFactory(ctx)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         .setEnableDecoderFallback(true)
@@ -197,6 +197,7 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
     var btnIndex by remember { mutableIntStateOf(1) }
     var seekOffset by remember { mutableDoubleStateOf(0.0) }
     var note by remember { mutableStateOf("") }
+    var retriedSame by remember { mutableIntStateOf(-1) }
     var segments by remember { mutableStateOf(listOf<SkipSegment>()) }
     var failed by remember { mutableStateOf(setOf<Int>()) }
     var expiredTried by remember { mutableStateOf(false) }
@@ -251,7 +252,12 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
     DisposableEffect(Unit) {
         val l = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                tryNext("La fonte non funziona, provo la successiva…")
+                // Prima riprovo la stessa fonte (spesso il servizio la stava ancora preparando), poi passo alla successiva
+                if (!started && retriedSame != index) {
+                    retriedSame = index
+                    note = "Riprovo la stessa sorgente…"
+                    load(index, position.coerceAtLeast(req.startAt))
+                } else tryNext("La fonte non funziona, provo la successiva…")
             }
             override fun onTracksChanged(tracks: Tracks) { trackTick++ }
             override fun onPlaybackStateChanged(state: Int) {
