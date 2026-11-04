@@ -74,19 +74,36 @@ object C {
     val pad = 48.dp
 }
 
-/** OK tenuto premuto (o tasto ☰ del telecomando): apre il menu dell'elemento. */
+/** Tasti che aprono subito il menu dell'elemento (utili con il telecomando della TV via HDMI-CEC,
+ *  che spesso non manda la pressione prolungata di OK). */
+private val menuKeys = setOf(
+    android.view.KeyEvent.KEYCODE_MENU, android.view.KeyEvent.KEYCODE_INFO,
+    android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, android.view.KeyEvent.KEYCODE_MEDIA_PLAY,
+    android.view.KeyEvent.KEYCODE_PROG_RED, android.view.KeyEvent.KEYCODE_PROG_GREEN,
+    android.view.KeyEvent.KEYCODE_PROG_YELLOW, android.view.KeyEvent.KEYCODE_PROG_BLUE,
+    android.view.KeyEvent.KEYCODE_GUIDE, android.view.KeyEvent.KEYCODE_SETTINGS
+)
+
+/** OK tenuto premuto (o tasto ☰ / Play-Pausa / Info / tasti colorati): apre il menu dell'elemento.
+ *  La pressione lunga si riconosce sia dalle ripetizioni del tasto (telecomando Fire TV) sia dalla
+ *  durata tra pressione e rilascio (telecomandi delle TV, che non ripetono il tasto). */
 fun Modifier.onMenuKey(action: () -> Unit): Modifier = composed {
     var longPressed by remember { mutableStateOf(false) }
+    var downAt by remember { mutableStateOf(0L) }
     onPreviewKeyEvent {
         val n = it.nativeKeyEvent
         val ok = n.keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || n.keyCode == android.view.KeyEvent.KEYCODE_ENTER
         when {
-            it.type == KeyEventType.KeyDown && it.key == Key.Menu -> { action(); true }
+            n.keyCode in menuKeys -> { if (it.type == KeyEventType.KeyDown && n.repeatCount == 0) action(); true }
+            ok && it.type == KeyEventType.KeyDown && n.repeatCount == 0 -> { downAt = n.eventTime; longPressed = false; false }
             ok && it.type == KeyEventType.KeyDown && n.repeatCount > 0 -> {
                 if (!longPressed && n.repeatCount >= 2) { longPressed = true; action() }
                 true   // finché tengo premuto non parte il clic normale
             }
             ok && it.type == KeyEventType.KeyUp && longPressed -> { longPressed = false; true }
+            ok && it.type == KeyEventType.KeyUp && downAt > 0 && n.eventTime - downAt >= 600 -> {
+                downAt = 0; action(); true     // tenuto premuto a lungo senza ripetizioni: menu, non clic
+            }
             else -> false
         }
     }
