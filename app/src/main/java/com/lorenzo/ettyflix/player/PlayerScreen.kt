@@ -58,6 +58,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.lifecycle.Lifecycle
@@ -577,13 +586,13 @@ private fun Controls(req: PlayRequest, position: Double, duration: Double, seekO
 @Composable
 private fun PlayerButton(id: String, playing: Boolean, focused: Boolean) {
     val icon = when (id) {
-        "back10" -> androidx.compose.material.icons.Icons.Filled.Replay10
-        "fwd10" -> androidx.compose.material.icons.Icons.Filled.Forward10
-        "play" -> if (playing) androidx.compose.material.icons.Icons.Filled.Pause else androidx.compose.material.icons.Icons.Filled.PlayArrow
-        "next" -> androidx.compose.material.icons.Icons.Filled.SkipNext
-        "sources" -> androidx.compose.material.icons.Icons.AutoMirrored.Filled.List
-        "audio" -> androidx.compose.material.icons.Icons.AutoMirrored.Filled.VolumeUp
-        else -> androidx.compose.material.icons.Icons.Filled.ClosedCaption
+        "back10" -> Icons.Filled.Replay10
+        "fwd10" -> Icons.Filled.Forward10
+        "play" -> if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow
+        "next" -> Icons.Filled.SkipNext
+        "sources" -> Icons.AutoMirrored.Filled.List
+        "audio" -> Icons.AutoMirrored.Filled.VolumeUp
+        else -> Icons.Filled.ClosedCaption
     }
     Box(Modifier.size(46.dp).clip(CircleShape).background(if (focused) Color.White else Color.Transparent),
         contentAlignment = Alignment.Center) {
