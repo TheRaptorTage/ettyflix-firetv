@@ -14,13 +14,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
-import android.util.Base64
 
 /** Client Trakt: liste pubbliche e account del profilo (accesso con codice). */
 object Trakt {
     private const val base = "https://api.trakt.tv"
-    private val authHosts = listOf("https://api.trakt.tv", "https://auth.trakt.tv")
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     var clientID by mutableStateOf(EttyFlixApp.prefs.getString("trakt_client_id", "") ?: "")
@@ -42,7 +39,7 @@ object Trakt {
     private var loginJob: Job? = null
     private val lastScrobble = HashMap<String, Long>()
     private val listCache = HashMap<String, List<MediaItem>>()
-    private var authBase: String = EttyFlixApp.prefs.getString("trakt_auth_base", "https://api.trakt.tv") ?: "https://api.trakt.tv"
+    private var authBase: String = EttyFlixApp.prefs.getString("trakt_auth_base", "https://auth.trakt.tv") ?: "https://auth.trakt.tv"
 
     val isConfigured get() = clientID.isNotEmpty()
     val isLoggedIn get() = accessToken != null
@@ -118,53 +115,61 @@ object Trakt {
 
     private suspend fun runLogin() {
         status = "Richiedo il codice…"
-        val verifier = (1..64).map { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~".random() }.joinToString("")
-        val challenge = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()),
-            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        // Flusso "dispositivo" come da documentazione Trakt: niente PKCE, segreto facoltativo,
+        // e il token si chiede allo STESSO indirizzo che ha dato il codice (auth.trakt.tv per primo).
         var found: JSONObject? = null
-        for (host in listOf(authBase) + authHosts.filter { it != authBase }) {
-            val body = JSONObject().put("client_id", clientID).put("code_challenge", challenge).put("code_challenge_method", "S256")
-            val r = send("/oauth/device/code", "POST", body, host = host)
+        var codeHost = ""
+        var firstError = ""
+        for (host in listOf("https://auth.trakt.tv", "https://api.trakt.tv")) {
+            val r = send("/oauth/device/code", "POST", JSONObject().put("client_id", clientID), host = host)
             val j = r.json()
             if (r.ok && j?.str("device_code") != null) {
-                found = j; authBase = host
+                found = j; codeHost = host; authBase = host
                 EttyFlixApp.prefs.edit().putString("trakt_auth_base", host).apply()
                 break
-            }
+            } else if (firstError.isEmpty()) firstError = "errore ${r.code}"
         }
-        val j = found ?: run { status = "Impossibile ottenere il codice: controlla il Client ID."; return }
+        val j = found ?: run { status = "Impossibile ottenere il codice (${firstError.ifEmpty { "rete" }}): controlla il Client ID."; return }
         val device = j.str("device_code")!!
         userCode = j.str("user_code")
         verificationURL = j.str("verification_url") ?: "https://trakt.tv/activate"
         status = "Inserisci il codice sul sito di Trakt."
-        var interval = (j.int("interval") ?: 5).toLong()
+        var interval = (j.int("interval") ?: 5).toLong().coerceAtLeast(1)
         val deadline = System.currentTimeMillis() + (j.int("expires_in") ?: 600) * 1000L
-        var variant = 0
-        val other = authHosts.firstOrNull { it != authBase } ?: authBase
+        val clientSecret = EttyFlixApp.prefs.getString("trakt_client_secret", "") ?: ""
+        var useSecret = clientSecret.isNotEmpty()
         while (System.currentTimeMillis() < deadline && scope.isActive) {
             delay(interval * 1000)
             val body = JSONObject().put("code", device).put("client_id", clientID)
-            if (variant != 1) body.put("code_verifier", verifier)
-            val r = send("/oauth/device/token", "POST", body, host = if (variant == 2) other else authBase)
+            if (useSecret) body.put("client_secret", clientSecret)
+            val r = send("/oauth/device/token", "POST", body, host = codeHost)
             when (r.code) {
-                200 -> {
-                    r.json()?.let { storeTokens(it) }
+                200, 201 -> {
+                    val tj = r.json()
+                    if (tj?.str("access_token") == null) { userCode = null; status = "Trakt ha risposto senza token. Riprova."; return }
+                    storeTokens(tj)
                     userCode = null
                     (json("/users/settings", auth = true) as? JSONObject)?.let { me ->
                         username = me.obj("user").str("username")
                         EttyFlixApp.prefs.edit().putString(Profiles.key("trakt_username"), username).apply()
                     }
-                    status = "Collegato. Sincronizzo…"
+                    status = "Collegato" + (username?.let { " come $it" } ?: "") + ". Sincronizzo…"
                     syncAll()
                     return
                 }
-                400 -> continue
+                400, 0 -> continue                         // codice non ancora inserito / rete
                 429 -> interval += 1
-                0 -> continue
+                401, 403 -> if (useSecret) { useSecret = false; continue } else {
+                    userCode = null; status = "Accesso non riuscito [${r.code}]. Riprova."; return
+                }
                 else -> {
-                    if (variant < 2) { variant++; continue }
                     userCode = null
-                    status = "Accesso non riuscito (errore ${r.code}: ${r.body.take(120)}). Riprova."
+                    val why = when (r.code) {
+                        404 -> "codice non valido"; 409 -> "codice già usato"; 410 -> "codice scaduto"
+                        418 -> "accesso negato su Trakt (se l'app Trakt è in modalità Development, aggiungi questo account come Tester)"
+                        else -> "errore ${r.code}"
+                    }
+                    status = "Accesso non riuscito: $why. Riprova."
                     return
                 }
             }

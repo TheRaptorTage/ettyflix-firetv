@@ -8,6 +8,34 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.util.Locale
 
+/** Codec audio scritto nella descrizione (DD+, AC3, DTS…), per quando il server non lo dichiara. */
+fun guessAudioCodec(raw: String): String {
+    val t = raw.lowercase()
+    fun has(p: String) = Regex(p).containsMatchIn(t)
+    return when {
+        has("truehd") -> "TRUEHD"
+        has("(dd\\+|ddp|e-?ac-?3|dolby digital plus)") -> "EAC3"
+        has("dts") -> "DTS"
+        has("(\\bac-?3\\b|\\bdd[ .]?[0-9]|\\bdd\\b|dolby digital)") -> "AC3"
+        has("\\baac") -> "AAC"
+        has("\\bopus\\b") -> "OPUS"
+        has("\\bflac\\b") -> "FLAC"
+        else -> ""
+    }
+}
+
+/** Canali scritti nella descrizione (7.1, 5.1, 2.0). */
+fun guessChannels(raw: String): Int {
+    val t = raw.lowercase()
+    fun has(ch: String) = Regex("(?<![0-9.])$ch(?![0-9]| ?(gb|mb|mbps))").containsMatchIn(t)
+    return when {
+        has("7[ .]1") -> 8
+        has("5[ .]1") -> 6
+        has("2[ .]0") || t.contains("stereo") -> 2
+        else -> 0
+    }
+}
+
 data class StreamSource(
     val id: String,
     val itemID: String,
@@ -89,6 +117,17 @@ data class StreamSource(
         if (audioLangs.any { it.lowercase() == "it" || it.lowercase().startsWith("ita") }) return true
         val t = "$title $fileName"
         return Regex("\\b(ITA|ITALIAN|ITALIANO)\\b", RegexOption.IGNORE_CASE).containsMatchIn(t) || t.contains("🇮🇹")
+    }
+
+    /** Sottotitoli in italiano (anche forced): tracce del file o riga 📝 della descrizione. */
+    val hasItalianSubs: Boolean get() {
+        if (subLangs.any { it.lowercase() == "it" || it.lowercase().startsWith("ita") }) return true
+        for (line in title.lines()) {
+            if (!line.contains("📝")) continue
+            val after = line.substringAfter("📝")
+            if (Regex("\\b(ita|italian|italiano)\\b", RegexOption.IGNORE_CASE).containsMatchIn(after)) return true
+        }
+        return Regex("\\b(sub|subs|subbed|forced)[ ._-]?ita\\b", RegexOption.IGNORE_CASE).containsMatchIn("$title $fileName")
     }
 
     /** Fonte d'errore finta inviata dal server (es. "429 Too Many Requests"). */
@@ -245,6 +284,9 @@ object Jellyfin {
         var file = path.substringBefore("?").substringAfterLast("/")
         file = runCatching { java.net.URLDecoder.decode(file, "UTF-8") }.getOrDefault(file)
         if (file.length < 4) file = name.lineSequence().firstOrNull() ?: name
+        // se il server non dichiara l'audio, lo ricavo dal testo della fonte (es. "DD+", "5.1")
+        if (aCodec.isEmpty()) aCodec = guessAudioCodec("$name $file")
+        if (aCh == 0) aCh = guessChannels("$name $file")
         return StreamSource(sid, itemID, name, (s.dbl("Size") ?: 0.0).toLong(), (s.str("Container") ?: "").uppercase(),
             vcodec, height, hdr, dv, audio, subs, file, aCodec, aCh, streamURL(s, itemID, sid, server))
     }
@@ -255,17 +297,32 @@ object Jellyfin {
             x.contains("720") -> 720; x.contains("480") -> 480; else -> 0 }
     }
 
-    /** Si passa sempre dal server, che crea il link per la connessione attuale. */
+    /** Link diretto (es. TorBox) quando c'è: veloce come in Stremio. Altrimenti si passa dal server. */
     private fun streamURL(s: JSONObject, itemID: String, sid: String, server: MediaServer): String {
         val d = s.str("DirectStreamUrl")
-        var full = if (d != null && !d.startsWith("http")) server.url + (if (d.startsWith("/")) d else "/$d")
+        if (d != null && d.startsWith("http")) return d
+        val path = s.str("Path")
+        if ((d == null || d.isEmpty()) && path != null && path.startsWith("http")) return path
+        var full = if (d != null && d.isNotEmpty()) server.url + (if (d.startsWith("/")) d else "/$d")
                    else server.url + "/Videos/$itemID/stream?static=true&MediaSourceId=" + sid.enc()
         if (!full.contains("api_key=")) full += (if (full.contains("?")) "&" else "?") + "api_key=" + server.token
         return full
     }
 
     /** Ordine come in Strand: italiano, pronta subito, risoluzione, HDR, DV, release, dimensione. */
-    fun sorted(list: List<StreamSource>): List<StreamSource> = list.withIndex().sortedWith { x, y ->
+    fun sorted(input: List<StreamSource>): List<StreamSource> {
+        // Lo stesso file arriva da più addon: se uno sa codec audio e canali e gli altri no, li completo.
+        val list = input.map { s ->
+            if (s.size <= 0 || (s.audioCodec.isNotEmpty() && s.audioChannels > 0)) return@map s
+            val twin = input.firstOrNull { o -> o.id != s.id && kotlin.math.abs(o.size - s.size) < 2_000_000 &&
+                o.effectiveHeight == s.effectiveHeight && (o.audioCodec.isNotEmpty() || o.audioChannels > 0) } ?: return@map s
+            s.copy(audioCodec = s.audioCodec.ifEmpty { twin.audioCodec },
+                   audioChannels = if (s.audioChannels == 0) twin.audioChannels else s.audioChannels)
+        }
+        return sortedRaw(list)
+    }
+
+    private fun sortedRaw(list: List<StreamSource>): List<StreamSource> = list.withIndex().sortedWith { x, y ->
         val a = x.value; val b = y.value
         when {
             a.isError != b.isError -> if (a.isError) 1 else -1
@@ -273,6 +330,8 @@ object Jellyfin {
             a.isPack != b.isPack -> if (!a.isPack) -1 else 1
             a.isReady != b.isReady -> if (a.isReady) -1 else 1
             a.effectiveHeight != b.effectiveHeight -> b.effectiveHeight.compareTo(a.effectiveHeight)
+            // a parità di qualità, prima quella con i sottotitoli in italiano (anche forced)
+            a.hasItalianSubs != b.hasItalianSubs -> if (a.hasItalianSubs) -1 else 1
             a.isHDR != b.isHDR -> if (a.isHDR) -1 else 1
             a.isDolbyVision != b.isDolbyVision -> if (a.isDolbyVision) -1 else 1
             a.releaseRank != b.releaseRank -> a.releaseRank.compareTo(b.releaseRank)
@@ -334,16 +393,26 @@ object SourceMatcher {
     fun group(fileName: String): String? =
         Regex("-([A-Za-z0-9]{2,20})$").find(fileName.substringBeforeLast("."))?.groupValues?.get(1)?.lowercase()
 
+    /** Parole del nome della release senza la parte che cambia tra episodi (S01E05, numeri). */
+    fun tokens(text: String): Set<String> {
+        val t = text.lowercase().replace(Regex("s\\d{1,2}\\s?e\\d{1,3}"), " ").replace(Regex("\\b\\d{1,2}x\\d{1,3}\\b"), " ")
+        return t.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 2 && it.toIntOrNull() == null }.toSet()
+    }
+
     fun pickIndex(list: List<StreamSource>, current: PlayerSource?): Int {
         if (current == null || list.isEmpty()) return 0
-        val curProv = provider((current.title ?: "") + " " + current.fileName)
+        val curText = (current.title ?: "") + " " + current.fileName
+        val curProv = provider(curText)
         val curGroup = group(current.fileName)
+        val curTokens = tokens(curText)
         var best = 0; var bestScore = 0
         list.forEachIndexed { i, s ->
             var score = 0
-            if (curProv != null && provider(s.title + " " + s.fileName) == curProv) score += 4
-            if (curGroup != null && group(s.fileName) == curGroup) score += 3
-            if (current.resolution.isNotEmpty() && s.resolutionLabel == current.resolution) score += 2
+            if (curProv != null && provider(s.title + " " + s.fileName) == curProv) score += 8
+            if (curGroup != null && group(s.fileName) == curGroup) score += 6
+            if (current.resolution.isNotEmpty() && s.resolutionLabel == current.resolution) score += 4
+            if (current.codec.isNotEmpty() && s.videoCodec == current.codec) score += 2
+            score += minOf(curTokens.intersect(tokens(s.title + " " + s.fileName)).size, 10)
             if (score > bestScore) { bestScore = score; best = i }
         }
         return best

@@ -1,5 +1,7 @@
 package com.lorenzo.ettyflix.data
 
+import com.lorenzo.ettyflix.EttyFlixApp
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -140,6 +142,7 @@ object ConfigReceiver {
             val done = mutableListOf<String>()
             obj.str("tmdb")?.takeIf { it.isNotBlank() }?.let { Store.saveKey(it); done += "chiave TMDB" }
             obj.str("trakt")?.takeIf { it.isNotBlank() }?.let { Trakt.saveClientID(it); done += "Client ID Trakt" }
+            obj.str("traktSecret")?.let { EttyFlixApp.prefs.edit().putString("trakt_client_secret", it).apply() }
             obj.str("omdb")?.takeIf { it.isNotBlank() }?.let {
                 com.lorenzo.ettyflix.EttyFlixApp.prefs.edit().putString("omdb_api_key", it.trim()).apply(); done += "chiave OMDb"
             }

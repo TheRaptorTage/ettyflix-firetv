@@ -58,6 +58,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.C as MC
 import androidx.media3.common.MediaItem as ExoItem
 import androidx.media3.common.PlaybackException
@@ -176,7 +180,12 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
     var started by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
     var lastActivity by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var panel by remember { mutableStateOf(false) }
+    /** pannello aperto: "audio", "subs" o "sources" (null = chiuso) */
+    var panelKind by remember { mutableStateOf<String?>(null) }
+    val panel = panelKind != null
+    /** sei sceso sui pulsanti: sinistra/destra spostano tra i pulsanti, OK li preme */
+    var buttons by remember { mutableStateOf(false) }
+    var btnIndex by remember { mutableIntStateOf(1) }
     var seekOffset by remember { mutableDoubleStateOf(0.0) }
     var note by remember { mutableStateOf("") }
     var segments by remember { mutableStateOf(listOf<SkipSegment>()) }
@@ -248,6 +257,16 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         onDispose { player.removeListener(l); player.release() }
     }
 
+    // Tasto Home del telecomando: l'app va in background, il video va in pausa (niente audio di sottofondo)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_STOP) { if (player.isPlaying) save(); player.pause() }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
     // Aggiornamento posizione + salvataggio ogni 10 secondi
     LaunchedEffect(Unit) {
         var tick = 0
@@ -259,7 +278,9 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
             playing = player.isPlaying
             buffering = player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_IDLE
             if (player.isPlaying && !started) { started = true; note = "" }
-            if (showControls && playing && !panel && System.currentTimeMillis() - lastActivity > 4000) showControls = false
+            if (showControls && playing && !panel && System.currentTimeMillis() - lastActivity > (if (buttons) 8000 else 4000)) {
+                showControls = false; buttons = false
+            }
             tick++
             if (tick % 20 == 0 && playing) save()
         }
@@ -294,9 +315,11 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         load(next, req.startAt)
     }
 
-    // Salta intro
+    // Salta intro / riassunto / titoli di coda (serie e film, da tre archivi)
     LaunchedEffect(req) {
-        if (isTV) segments = IntroService.segments(req.media.tmdbID, req.season!!, req.episode!!)
+        val movie = req.media.mediaType == "movie"
+        if (isTV || movie) segments = IntroService.segments(req.media.tmdbID,
+            if (movie) null else req.season, if (movie) null else req.episode)
     }
 
     // Episodio successivo: lo cerco 20 secondi dopo l'inizio, con la stessa fonte
@@ -320,9 +343,33 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
 
     LaunchedEffect(Unit) { delay(100); runCatching { rootFocus.requestFocus() } }
 
+    // Pulsanti in basso (come su Apple TV e Mac)
+    val btnIds = buildList {
+        add("back10"); add("play"); add("fwd10")
+        if (isTV) add("next")
+        if (srcList.size > 1) add("sources")
+        add("audio"); add("subs")
+    }
+    fun pressButton(id: String) {
+        wake()
+        when (id) {
+            "back10" -> player.seekTo(((position - 10).coerceAtLeast(0.0) * 1000).toLong())
+            "fwd10" -> player.seekTo(((position + 10).coerceAtMost((duration - 2).coerceAtLeast(0.0)) * 1000).toLong())
+            "play" -> if (player.isPlaying) { player.pause(); save() } else player.play()
+            "next" -> scope.launch {
+                // se la ricerca anticipata non è finita, aspetto un po' che arrivi
+                var waited = 0
+                while (nextReady == null && waited < 40) { delay(500); waited++ }
+                playNextEpisode()
+            }
+            "sources", "audio", "subs" -> panelKind = id
+        }
+    }
+
     BackHandler {
         when {
-            panel -> { panel = false; runCatching { rootFocus.requestFocus() } }
+            panel -> { panelKind = null; runCatching { rootFocus.requestFocus() } }
+            buttons -> buttons = false
             showControls && playing -> showControls = false
             else -> close()
         }
@@ -339,6 +386,19 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
                 if (panel) return@onPreviewKeyEvent false
                 val native = ev.nativeKeyEvent
                 val down = native.action == KeyEvent.ACTION_DOWN
+                if (buttons) {
+                    // sui pulsanti: sinistra/destra si spostano (senza uscire), OK preme, su/giù non fanno nulla
+                    when (native.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { if (down) { wake(); btnIndex = (btnIndex - 1).coerceAtLeast(0) }; return@onPreviewKeyEvent true }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> { if (down) { wake(); btnIndex = (btnIndex + 1).coerceAtMost(btnIds.size - 1) }; return@onPreviewKeyEvent true }
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                            if (down && native.repeatCount == 0) btnIds.getOrNull(btnIndex)?.let { pressButton(it) }
+                            return@onPreviewKeyEvent true
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> { if (down) wake(); return@onPreviewKeyEvent true }
+                        else -> {}
+                    }
+                }
                 when (native.keyCode) {
                     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                     KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
@@ -369,11 +429,15 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        if (down && native.repeatCount == 0) { if (showControls) panel = true else wake() }
+                        // giù: si scende sui pulsanti, sia in pausa che durante il film
+                        if (down && native.repeatCount == 0) {
+                            wake(); buttons = true
+                            btnIndex = btnIds.indexOf("play").coerceAtLeast(0)
+                        }
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_MENU -> {
-                        if (down) { if (native.keyCode == KeyEvent.KEYCODE_MENU) panel = true else wake() }
+                        if (down) { if (native.keyCode == KeyEvent.KEYCODE_MENU) panelKind = "audio" else wake() }
                         true
                     }
                     else -> false
@@ -403,7 +467,8 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         }
 
         AnimatedVisibility(showControls || !playing || seekOffset != 0.0, enter = fadeIn(), exit = fadeOut()) {
-            Controls(req, position, duration, seekOffset, playing, segments, srcList.getOrNull(index))
+            Controls(req, position, duration, seekOffset, playing, segments, srcList.getOrNull(index),
+                btnIds, if (buttons) btnIndex else -1)
         }
 
         if (note.isNotEmpty()) {
@@ -434,15 +499,17 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
             }
         }
 
-        if (panel) OptionsPanel(player, srcList, index, trackTick,
-            onSource = { i -> panel = false; failed = emptySet(); load(i, position); runCatching { rootFocus.requestFocus() } },
-            onClose = { panel = false; runCatching { rootFocus.requestFocus() } })
+        panelKind?.let { kind ->
+            OptionsPanel(player, kind, srcList, index, trackTick,
+                onSource = { i -> panelKind = null; buttons = false; failed = emptySet(); load(i, position); runCatching { rootFocus.requestFocus() } },
+                onClose = { panelKind = null; runCatching { rootFocus.requestFocus() } })
+        }
     }
 }
 
 @Composable
 private fun Controls(req: PlayRequest, position: Double, duration: Double, seekOffset: Double, playing: Boolean,
-                     segments: List<SkipSegment>, src: PlayerSource?) {
+                     segments: List<SkipSegment>, src: PlayerSource?, btnIds: List<String>, focusedBtn: Int) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color(0xA6000000), Color.Transparent)))
             .padding(horizontal = 48.dp, vertical = 30.dp)) {
@@ -480,21 +547,54 @@ private fun Controls(req: PlayRequest, position: Double, duration: Double, seekO
                 if (seekOffset != 0.0) Text("  (" + (if (seekOffset >= 0) "+" else "-") + formatTime(kotlin.math.abs(seekOffset)) + ")",
                     color = yellow, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                Text(if (playing) "◀ ▶ avanti/indietro (tieni premuto per andare veloce) · ▼ audio, sottotitoli e fonti"
-                     else "In pausa · OK per riprendere · ▼ audio, sottotitoli e fonti",
+                Text(if (focusedBtn >= 0) "◀ ▶ scegli un pulsante · OK per premerlo · Indietro torna alla barra"
+                     else if (playing) "◀ ▶ avanti/indietro (tieni premuto per andare veloce) · ▼ pulsanti"
+                     else "In pausa · OK per riprendere · ▼ pulsanti",
                     color = Color(0x99FFFFFF), fontSize = 13.sp)
                 Spacer(Modifier.weight(1f))
                 Text("-" + formatTime((duration - position).coerceAtLeast(0.0)), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
             if (src != null) Text(listOf(src.resolution, src.codec, src.size).filter { it.isNotEmpty() }.joinToString(" · "),
                 color = Color(0x80FFFFFF), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            // pulsanti: a sinistra riproduzione, a destra fonti/audio/sottotitoli
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                val left = btnIds.filter { it in listOf("back10", "play", "fwd10", "next") }
+                val right = btnIds.filter { it !in left }
+                Row(Modifier.clip(RoundedCornerShape(50)).background(Color(0x33FFFFFF)).padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (id in left) PlayerButton(id, playing, btnIds.indexOf(id) == focusedBtn)
+                }
+                Spacer(Modifier.weight(1f))
+                Row(Modifier.clip(RoundedCornerShape(50)).background(Color(0x33FFFFFF)).padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (id in right) PlayerButton(id, playing, btnIds.indexOf(id) == focusedBtn)
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun PlayerButton(id: String, playing: Boolean, focused: Boolean) {
+    val icon = when (id) {
+        "back10" -> androidx.compose.material.icons.Icons.Filled.Replay10
+        "fwd10" -> androidx.compose.material.icons.Icons.Filled.Forward10
+        "play" -> if (playing) androidx.compose.material.icons.Icons.Filled.Pause else androidx.compose.material.icons.Icons.Filled.PlayArrow
+        "next" -> androidx.compose.material.icons.Icons.Filled.SkipNext
+        "sources" -> androidx.compose.material.icons.Icons.AutoMirrored.Filled.List
+        "audio" -> androidx.compose.material.icons.Icons.AutoMirrored.Filled.VolumeUp
+        else -> androidx.compose.material.icons.Icons.Filled.ClosedCaption
+    }
+    Box(Modifier.size(46.dp).clip(CircleShape).background(if (focused) Color.White else Color.Transparent),
+        contentAlignment = Alignment.Center) {
+        androidx.compose.material3.Icon(icon, contentDescription = id, tint = if (focused) Color.Black else Color.White,
+            modifier = Modifier.size(if (id == "play") 30.dp else 26.dp))
     }
 }
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun OptionsPanel(player: ExoPlayer, sources: List<PlayerSource>, current: Int, tick: Int,
+private fun OptionsPanel(player: ExoPlayer, kind: String, sources: List<PlayerSource>, current: Int, tick: Int,
                          onSource: (Int) -> Unit, onClose: () -> Unit) {
     @Suppress("UNUSED_VARIABLE") val t = tick
     var refresh by remember { mutableIntStateOf(0) }
@@ -507,22 +607,25 @@ private fun OptionsPanel(player: ExoPlayer, sources: List<PlayerSource>, current
     Box(Modifier.fillMaxSize().background(Color(0x99000000))) {
         Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(330.dp).background(Color(0xF0151820))
             .padding(horizontal = 40.dp, vertical = 22.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            PanelColumn("Audio", Modifier.weight(1f)) {
+            if (kind == "audio") PanelColumn("Audio", Modifier.weight(1f)) {
                 itemsIndexed(audio) { i, a ->
                     PanelButton(a.label, a.selected, if (i == 0) Modifier.focusRequester(first) else Modifier) {
                         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                             .setOverrideForType(TrackSelectionOverride(a.group.mediaTrackGroup, a.index)).build()
                         refresh++
+                        onClose()
                     }
                 }
-                if (audio.isEmpty()) item { Text("Nessuna traccia", color = Color(0x80FFFFFF), fontSize = 13.sp) }
+                if (audio.isEmpty()) item { Text("Nessuna traccia", color = Color(0x80FFFFFF), fontSize = 13.sp,
+                    modifier = Modifier.focusRequester(first).focusable()) }
             }
-            PanelColumn("Sottotitoli", Modifier.weight(1f)) {
+            if (kind == "subs") PanelColumn("Sottotitoli", Modifier.weight(1f)) {
                 item {
-                    PanelButton("Disattivati", subsOff, if (audio.isEmpty()) Modifier.focusRequester(first) else Modifier) {
+                    PanelButton("Disattivati", subsOff, Modifier.focusRequester(first)) {
                         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                             .setTrackTypeDisabled(MC.TRACK_TYPE_TEXT, true).build()
                         refresh++
+                        onClose()
                     }
                 }
                 itemsIndexed(subs) { _, s ->
@@ -531,13 +634,15 @@ private fun OptionsPanel(player: ExoPlayer, sources: List<PlayerSource>, current
                             .setTrackTypeDisabled(MC.TRACK_TYPE_TEXT, false)
                             .setOverrideForType(TrackSelectionOverride(s.group.mediaTrackGroup, s.index)).build()
                         refresh++
+                        onClose()
                     }
                 }
             }
-            PanelColumn("Sorgente", Modifier.weight(1.4f)) {
+            if (kind == "sources") PanelColumn("Sorgente", Modifier.weight(1.4f)) {
                 itemsIndexed(sources) { i, s ->
                     PanelButton(listOf(s.resolution, s.codec, s.size).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "Sorgente ${i + 1}" } +
-                        "\n" + (s.title ?: s.fileName).replace("\n", " ").take(80), i == current) { onSource(i) }
+                        "\n" + (s.title ?: s.fileName).replace("\n", " ").take(80), i == current,
+                        if (i == 0) Modifier.focusRequester(first) else Modifier) { onSource(i) }
                 }
             }
         }
@@ -570,6 +675,7 @@ private fun PanelButton(text: String, selected: Boolean, modifier: Modifier = Mo
 @Composable
 fun LivePlayerScreen(start: LiveChannel) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val player = remember { buildPlayer(ctx) }
     var channel by remember { mutableStateOf(start) }
     var urlIndex by remember { mutableIntStateOf(0) }
@@ -577,63 +683,138 @@ fun LivePlayerScreen(start: LiveChannel) {
     var lastActivity by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var buffering by remember { mutableStateOf(true) }
     var note by remember { mutableStateOf("") }
+    /** menu laterale dei canali (1° Indietro) */
+    var menuOpen by remember { mutableStateOf(false) }
+    // ricollegamento automatico quando il link del canale scade e l'immagine si ferma
+    var reconnecting by remember { mutableStateOf(false) }
+    var reconnectStarted by remember { mutableLongStateOf(0L) }
+    var reconnectTries by remember { mutableIntStateOf(0) }
+    var stuckSince by remember { mutableLongStateOf(0L) }
+    var lastPos by remember { mutableLongStateOf(-1L) }
+    var wasPlayingBeforeStop by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
-    val list = LiveTV.visibleChannels
+    val list = LiveTV.favoriteChannels + LiveTV.visibleChannels.filter { it.id !in LiveTV.favorites }
 
     fun load() {
         val u = channel.urls.getOrNull(urlIndex) ?: return
         player.setMediaItem(ExoItem.fromUri(u))
         player.prepare(); player.play()
+        lastPos = -1L; stuckSince = 0L
+    }
+
+    fun reconnect() {
+        reconnectTries++
+        // dopo qualche tentativo, se il canale ha più flussi, provo il successivo
+        if (reconnectTries > 3 && channel.urls.size > 1) { urlIndex = (urlIndex + 1) % channel.urls.size; reconnectTries = 1 }
+        reconnecting = true
+        reconnectStarted = System.currentTimeMillis()
+        load()                     // l'indirizzo della lista dà un link nuovo, con un permesso nuovo
+    }
+
+    fun switchTo(c: LiveChannel) {
+        menuOpen = false
+        runCatching { focus.requestFocus() }
+        if (c.id == channel.id) return
+        channel = c; urlIndex = 0; reconnecting = false; reconnectTries = 0
         showInfo = true; lastActivity = System.currentTimeMillis()
+        load()
     }
 
     DisposableEffect(Unit) {
         val l = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                if (urlIndex + 1 < channel.urls.size) { urlIndex++; note = "Provo un altro flusso…"; load() }
-                else note = "Il canale non è disponibile al momento."
+                if (reconnectTries < 3) { reconnect(); return }
+                if (urlIndex + 1 < channel.urls.size) { urlIndex++; reconnectTries = 0; note = "Provo un altro flusso…"; load() }
+                else { reconnecting = false; note = "Il canale non è disponibile al momento." }
             }
         }
         player.addListener(l)
         load()
         onDispose { player.removeListener(l); player.release() }
     }
+
+    // Tasto Home: niente audio in sottofondo; al ritorno si riparte dalla diretta di adesso
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
+                Lifecycle.Event.ON_STOP -> { wasPlayingBeforeStop = player.playWhenReady; player.stop() }
+                Lifecycle.Event.ON_START -> if (wasPlayingBeforeStop) { wasPlayingBeforeStop = false; load() }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             delay(500)
+            val now = System.currentTimeMillis()
             buffering = player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_IDLE
             if (player.isPlaying) note = ""
-            if (showInfo && System.currentTimeMillis() - lastActivity > 5000) showInfo = false
+            if (showInfo && !menuOpen && now - lastActivity > 5000) showInfo = false
+            // controllo: se l'immagine resta ferma 3 secondi, rinnovo il link del canale
+            if (!player.playWhenReady || menuOpen) { stuckSince = 0L; continue }
+            val pos = player.currentPosition
+            val moving = player.isPlaying && pos != lastPos
+            lastPos = pos
+            if (moving) {
+                stuckSince = 0L
+                if (reconnecting && now - reconnectStarted > 1000) { reconnecting = false; reconnectTries = 0 }
+                continue
+            }
+            if (stuckSince == 0L) stuckSince = now
+            val ended = player.playbackState == Player.STATE_ENDED
+            if (!reconnecting && (now - stuckSince >= 3000 || ended)) reconnect()
+            else if (reconnecting && now - reconnectStarted >= 7000) reconnect()
         }
     }
     LaunchedEffect(Unit) { delay(100); runCatching { focus.requestFocus() } }
-    BackHandler { Nav.pop() }
+
+    // 1° Indietro: menu dei canali · 2° Indietro (con il menu aperto): esco dalla TV e torno alla Home
+    BackHandler {
+        if (menuOpen) { player.stop(); Nav.selectTab(Screen.Home) }
+        else { menuOpen = true; showInfo = true; lastActivity = System.currentTimeMillis() }
+    }
 
     fun zap(d: Int) {
         if (list.isEmpty()) return
         val i = list.indexOfFirst { it.id == channel.id }
-        channel = list[((if (i < 0) 0 else i) + d + list.size) % list.size]
-        urlIndex = 0
-        load()
+        switchTo(list[((if (i < 0) 0 else i) + d + list.size) % list.size])
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black).focusRequester(focus)
-        .onPreviewKeyEvent { ev ->
-            val n = ev.nativeKeyEvent
-            if (n.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent n.keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN)
-            when (n.keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { zap(-1); true }
-                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(1); true }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { showInfo = !showInfo; lastActivity = System.currentTimeMillis(); true }
-                else -> false
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(Modifier.fillMaxSize().focusRequester(focus)
+            .onPreviewKeyEvent { ev ->
+                if (menuOpen) return@onPreviewKeyEvent false
+                val n = ev.nativeKeyEvent
+                if (n.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent n.keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN)
+                when (n.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { zap(-1); true }
+                    KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(1); true }
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { showInfo = !showInfo; lastActivity = System.currentTimeMillis(); true }
+                    else -> false
+                }
+            }.focusable()) {
+            VideoSurface(player)
+        }
+        if (buffering && !reconnecting) CircularProgressIndicator(color = Color.White, modifier = Modifier.align(Alignment.Center))
+        if (reconnecting) {
+            Column(Modifier.align(Alignment.Center).clip(RoundedCornerShape(22.dp)).background(Color(0xD91A1D24))
+                .padding(horizontal = 36.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Color.White)
+                Spacer(Modifier.height(12.dp))
+                Text("Ricollego il canale…", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Text("Il link del canale è scaduto e lo sto rinnovando.\nNon è un problema della tua connessione.",
+                    color = Color(0xBFFFFFFF), fontSize = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(top = 6.dp))
             }
-        }.focusable()) {
-        VideoSurface(player)
-        if (buffering) CircularProgressIndicator(color = Color.White, modifier = Modifier.align(Alignment.Center))
+        }
         if (note.isNotEmpty()) Text(note, color = Color.White, fontSize = 16.sp, modifier = Modifier.align(Alignment.TopCenter).padding(30.dp)
             .background(Color(0xCC1A1D24), RoundedCornerShape(50)).padding(horizontal = 20.dp, vertical = 10.dp))
-        AnimatedVisibility(showInfo, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomStart)) {
+        AnimatedVisibility(showInfo && !menuOpen, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomStart)) {
             val now = LiveTV.current(channel)
             val next = LiveTV.next(channel)
             Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xD9000000))))
@@ -652,9 +833,70 @@ fun LivePlayerScreen(start: LiveChannel) {
                     if (next != null) Text("Dopo: ${next.timeRange} · ${next.title}", color = Color(0x99FFFFFF), fontSize = 13.sp,
                         modifier = Modifier.padding(top = 6.dp), maxLines = 1)
                 }
-                Text("▲▼ cambia canale", color = Color(0x80FFFFFF), fontSize = 13.sp)
+                Text("▲▼ cambia canale · Indietro: elenco canali", color = Color(0x80FFFFFF), fontSize = 13.sp)
+            }
+        }
+        if (menuOpen) ChannelMenu(list, channel, onPick = { switchTo(it) },
+            onClose = { menuOpen = false; runCatching { focus.requestFocus() } })
+    }
+}
+
+/** Menu laterale con i canali: su/giù scorrono, OK apre, destra chiude il menu. */
+@Composable
+private fun ChannelMenu(list: List<LiveChannel>, current: LiveChannel, onPick: (LiveChannel) -> Unit, onClose: () -> Unit) {
+    val state = rememberLazyListState()
+    val startIndex = list.indexOfFirst { it.id == current.id }.coerceAtLeast(0)
+    val requesters = remember(list.size) { List(list.size) { FocusRequester() } }
+    LaunchedEffect(Unit) {
+        state.scrollToItem((startIndex - 3).coerceAtLeast(0))
+        delay(120)
+        runCatching { requesters.getOrNull(startIndex)?.requestFocus() }
+    }
+    Row(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxHeight().width(380.dp)
+            .background(Brush.horizontalGradient(listOf(Color(0xF0000000), Color(0xC0000000))))
+            .padding(horizontal = 20.dp, vertical = 26.dp)
+            .onPreviewKeyEvent { ev ->
+                val n = ev.nativeKeyEvent
+                when (n.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> { if (n.action == KeyEvent.ACTION_DOWN) onClose(); true }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> true          // a sinistra non succede nulla
+                    else -> false
+                }
+            }) {
+            Text("Canali", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 10.dp))
+            LazyColumn(state = state, modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                itemsIndexed(list) { i, c -> ChannelRow(c, c.id == current.id, requesters[i]) { onPick(c) } }
+            }
+            Text("Indietro di nuovo per tornare alla Home", color = Color(0x80FFFFFF), fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp, top = 8.dp))
+        }
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ChannelRow(c: LiveChannel, isCurrent: Boolean, requester: FocusRequester, onClick: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val focused by src.collectIsFocusedAsState()
+    val p = LiveTV.current(c)
+    Row(Modifier.fillMaxWidth().focusRequester(requester).clip(RoundedCornerShape(12.dp))
+        .background(if (focused) Color.White else Color(0x10FFFFFF))
+        .clickable(interactionSource = src, indication = null, onClick = onClick)
+        .padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(64.dp, 40.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x22FFFFFF)).padding(4.dp)) {
+            if (c.logo != null) Img(c.logo, Modifier.fillMaxSize(), androidx.compose.ui.layout.ContentScale.Fit)
+        }
+        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(c.name, color = if (focused) Color.Black else Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (LiveTV.isFavorite(c)) Text("  ★", color = if (focused) Color(0xFFB8860B) else yellow, fontSize = 13.sp)
+                if (isCurrent) Text("  🔊", fontSize = 12.sp)
+            }
+            if (p != null) {
+                Text(p.title, color = if (focused) Color(0xB3000000) else Color(0xB3FFFFFF), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(p.timeRange, color = if (focused) Color(0x80000000) else Color(0x80FFFFFF), fontSize = 11.sp)
             }
         }
     }
 }
-

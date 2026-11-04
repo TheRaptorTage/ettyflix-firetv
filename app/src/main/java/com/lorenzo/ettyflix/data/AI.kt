@@ -321,23 +321,57 @@ data class SkipSegment(val kind: String, val start: Double, val end: Double) {
     val label get() = when (kind) { "recap" -> "Salta riassunto"; "outro" -> "Salta titoli di coda"; else -> "Salta intro" }
 }
 
+/** Tempi di riassunto, sigla e titoli di coda da tre archivi gratuiti: IntroDB, TheIntroDB (anche film) e SkipDB. */
 object IntroService {
     private val cache = HashMap<String, List<SkipSegment>>()
 
-    suspend fun segments(tmdbID: Int, season: Int, episode: Int): List<SkipSegment> {
-        val key = "$tmdbID-$season-$episode"
-        cache[key]?.let { return it }
-        val imdb = TMDB.imdbID("tv", tmdbID) ?: return emptyList()
-        val j = Http.get("https://api.introdb.app/segments?imdb_id=$imdb&season=$season&episode=$episode",
-            mapOf("Accept" to "application/json"), 15).let { if (it.ok) it.json() else null }
-        val out = mutableListOf<SkipSegment>()
-        if (j != null) for (kind in listOf("recap", "intro", "outro")) {
-            val s = j.optJSONObject(kind) ?: continue
-            val start = s.dbl("start_sec") ?: s.dbl("start_ms")?.div(1000) ?: continue
-            val end = s.dbl("end_sec") ?: s.dbl("end_ms")?.div(1000) ?: Double.MAX_VALUE
-            if (end > start) out += SkipSegment(kind, start, end)
-        }
-        cache[key] = out
-        return out
+    fun merge(primary: List<SkipSegment>, extra: List<SkipSegment>): List<SkipSegment> {
+        val out = primary.toMutableList()
+        for (e in extra) if (out.none { it.kind == e.kind }) out += e
+        return out.sortedBy { it.start }
     }
+
+    private fun seg(kind: String, o: org.json.JSONObject?): SkipSegment? {
+        if (o == null) return null
+        val start = o.dbl("start_sec") ?: o.dbl("start_ms")?.div(1000)
+        val end = o.dbl("end_sec") ?: o.dbl("end_ms")?.div(1000)
+        if (start == null && end == null) return null
+        val a = start ?: 0.0; val b = end ?: Double.MAX_VALUE
+        return if (b > a) SkipSegment(kind, a, b) else null
+    }
+
+    private suspend fun fetch(url: String) = Http.get(url, mapOf("Accept" to "application/json"), 10).let { if (it.ok) it.json() else null }
+
+    /** Serie: season ed episode; film: entrambi null. */
+    suspend fun segments(tmdbID: Int, season: Int?, episode: Int?): List<SkipSegment> = kotlinx.coroutines.coroutineScope {
+        val movie = season == null || episode == null
+        val key = "${if (movie) "m" else "t"}$tmdbID-${season ?: 0}-${episode ?: 0}"
+        cache[key]?.let { return@coroutineScope it }
+        val imdb = TMDB.imdbID(if (movie) "movie" else "tv", tmdbID)
+        val ep = if (movie) "" else "&season=$season&episode=$episode"
+        val a = async {
+            if (movie || imdb == null) emptyList() else fetch("https://api.introdb.app/segments?imdb_id=$imdb$ep")
+                ?.let { j -> listOf("recap", "intro", "outro").mapNotNull { seg(it, j.optJSONObject(it)) } } ?: emptyList()
+        }
+        val b = async {
+            fetch("https://api.theintrodb.org/v3/media?tmdb_id=$tmdbID$ep")?.let { j ->
+                listOf("recap" to "recap", "intro" to "intro", "credits" to "outro").mapNotNull { (field, kind) ->
+                    val arr = j.optJSONArray(field) ?: return@mapNotNull null
+                    (0 until arr.length()).firstNotNullOfOrNull { seg(kind, arr.optJSONObject(it)) }
+                }
+            } ?: emptyList()
+        }
+        val c = async {
+            if (imdb == null) emptyList() else fetch("https://skipdb.tv/api/segments?imdb_id=$imdb$ep")?.let { j ->
+                val root = j.optJSONObject("segments")
+                listOf("recap", "intro", "outro").mapNotNull { seg(it, root?.optJSONObject(it)) ?: seg(it, j.optJSONObject(it)) }
+            } ?: emptyList()
+        }
+        val out = merge(merge(a.await(), b.await()), c.await())
+        cache[key] = out
+        out
+    }
+
+    suspend fun segments(tmdbID: Int, season: Int, episode: Int): List<SkipSegment> =
+        segments(tmdbID, season as Int?, episode as Int?)
 }
