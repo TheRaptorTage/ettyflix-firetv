@@ -85,7 +85,7 @@ data class StreamSource(
         else -> null
     }
 
-    private val mbps: Double? get() = Regex("([0-9]+([.,][0-9]+)?) ?mbps").find(text)?.groupValues?.get(1)?.replace(",", ".")?.toDoubleOrNull()
+    val mbps: Double? get() = Regex("([0-9]+([.,][0-9]+)?) ?mbps").find(text)?.groupValues?.get(1)?.replace(",", ".")?.toDoubleOrNull()
 
     val isPack: Boolean get() {
         val m = mbps ?: return false
@@ -128,6 +128,65 @@ data class StreamSource(
             if (Regex("\\b(ita|italian|italiano)\\b", RegexOption.IGNORE_CASE).containsMatchIn(after)) return true
         }
         return Regex("\\b(sub|subs|subbed|forced)[ ._-]?ita\\b", RegexOption.IGNORE_CASE).containsMatchIn("$title $fileName")
+    }
+
+    /** Nome dell'addon che ha trovato la fonte (Meteor, Comet, MediaFusion…), preso dalla descrizione. */
+    val addonName: String get() {
+        val known = listOf(
+            "meteor" to "Meteor", "comet" to "Comet", "mediafusion" to "MediaFusion", "torrentio" to "Torrentio",
+            "jackettio" to "Jackettio", "stremthru" to "StremThru", "peerflix" to "Peerflix",
+            "corsaroviola" to "CorsaroViola", "corsaro viola" to "CorsaroViola", "corsaronero" to "Il Corsaro Nero",
+            "corsaro nero" to "Il Corsaro Nero", "knightcrawler" to "KnightCrawler", "orion" to "Orion",
+            "easynews" to "Easynews", "debridio" to "Debridio", "zilean" to "Zilean", "sootio" to "Sootio",
+            "streamingcommunity" to "StreamingCommunity", "mammamia" to "MammaMia", "animeworld" to "AnimeWorld",
+            "guardaserie" to "GuardaSerie", "mircrew" to "MIRCrew", "knaben" to "Knaben"
+        )
+        val t = title.lowercase()
+        known.mapNotNull { (k, n) -> t.indexOf(k).takeIf { it >= 0 }?.let { it to n } }.minByOrNull { it.first }?.let { return it.second }
+        if (t.contains("torbox")) return "TorBox"
+        var first = title.lines().firstOrNull() ?: ""
+        first = first.replace(Regex("\\[[^\\]]*\\]"), " ").substringBefore("|")
+        val clean = first.filter { it.isLetterOrDigit() || it == ' ' }
+        val drop = setOf("tb", "rd", "ad", "pm", "dl", "ed", "oc", "cached", "instant", "uncached",
+            "2160p", "1440p", "1080p", "1080i", "720p", "576p", "480p", "4k", "uhd", "hd", "sd", "p")
+        val name = clean.split(" ").filter { it.isNotBlank() && it.lowercase() !in drop }.take(3).joinToString(" ")
+        return if (name.isEmpty()) "Jellyfin" else name.take(28)
+    }
+
+    /** Velocità che serve (Mbps): quella media del file con un margine del 25%. */
+    fun neededMbps(runtime: Int?): Int? {
+        if (isPack) return null
+        var avg = mbps
+        if (avg == null && size > 0 && runtime != null && runtime > 0) avg = size * 8.0 / (runtime * 60.0) / 1_000_000
+        val a = avg ?: return null
+        if (a <= 0) return null
+        return maxOf(1, kotlin.math.ceil(a * 1.25).toInt())
+    }
+
+    val videoBadge: String? get() {
+        val c = videoCodec.lowercase()
+        return when {
+            c.isEmpty() -> null
+            c.contains("hevc") || c.contains("265") -> "HEVC"
+            c.contains("264") || c.contains("avc") -> "H.264"
+            c.contains("av1") -> "AV1"
+            else -> videoCodec.uppercase()
+        }
+    }
+
+    val audioBadge: String? get() {
+        val c = audioCodec.lowercase()
+        return when {
+            c.isEmpty() -> null
+            c.contains("truehd") -> "TrueHD"
+            c.contains("dts") -> if (text.contains("dts-hd") || text.contains("dts hd") || text.contains("dts-x")) "DTS HD" else "DTS"
+            c.contains("eac3") -> "EAC3"
+            c.contains("ac3") -> "AC3"
+            c.contains("aac") -> "AAC"
+            c.contains("flac") -> "FLAC"
+            c.contains("opus") -> "Opus"
+            else -> audioCodec.uppercase()
+        }
     }
 
     /** Fonte d'errore finta inviata dal server (es. "429 Too Many Requests"). */

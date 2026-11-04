@@ -1,5 +1,7 @@
 package com.lorenzo.ettyflix.ui
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -110,7 +112,7 @@ fun SourcesScreen(req: PlayRequest) {
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp)) {
                     itemsIndexed(sources, key = { i, s -> s.id + i }) { i, s ->
-                        SourceRow(s, if (i == 0) Modifier.focusRequester(firstFocus) else Modifier) { if (!s.isError) choose(i) }
+                        SourceRow(s, req.runtime, if (i == 0) Modifier.focusRequester(firstFocus) else Modifier) { if (!s.isError) choose(i) }
                     }
                     if (searching) item {
                         Text("Cerco altre sorgenti…", color = C.faint, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
@@ -135,39 +137,75 @@ fun SourcesScreen(req: PlayRequest) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SourceRow(s: StreamSource, modifier: Modifier, onClick: () -> Unit) {
+private fun SourceRow(s: StreamSource, runtime: Int?, modifier: Modifier, onClick: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(14.dp)
-    Column(
+    val shape = RoundedCornerShape(16.dp)
+    Row(
         modifier.fillMaxWidth().scale(if (focused) 1.015f else 1f).clip(shape)
-            .background(if (focused) Color(0xFF3A3F4B) else Color(0xFF2A2E38))
-            .border(if (focused) 2.dp else 0.dp, if (focused) Color.White else Color.Transparent, shape)
+            .background(if (focused) Color(0x40FFFFFF) else Color(0x1FFFFFFF))
+            .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color(0x26FFFFFF), shape)
             .clickable(interactionSource = src, indication = null, onClick = onClick)
-            .padding(16.dp)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            val head = listOf(s.resolutionLabel, s.sizeLabel).filter { it.isNotEmpty() }.joinToString(" · ")
-            Text(if (s.isError) "Errore della fonte" else head.ifEmpty { "Sorgente" }, color = Color.White, fontSize = 16.sp,
-                fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            if (s.hasItalianAudio) Tag("ITA")
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (s.isError) "Errore della fonte" else s.addonName, color = Color.White, fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold, maxLines = 1)
+                if (s.isReady) Text("  ⚡", color = Color(0xFFFFD60A), fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            // le etichette vanno a capo invece di rimpicciolirsi
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (s.resolutionLabel.isNotEmpty()) Tag(s.resolutionLabel)
+                if (s.isDolbyVision) DolbyLogo("VISION") else if (s.isHDR) Tag("HDR")
+                if (s.isAtmos) DolbyLogo("ATMOS") else s.audioBadge?.let { Tag(it) }
+                if (s.channelsLabel.isNotEmpty()) Tag(s.channelsLabel)
+                s.videoBadge?.let { Tag(it) }
+                if (s.releaseRank == 0) Tag("Remux")
+                if (s.hasItalianAudio) Tag("Italiano")
+                if (s.hasItalianSubs) Tag("Sub ITA")
+                if (s.isPack) Tag("Pacchetto stagione")
+            }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(s.title.replace("\n", "  "), color = C.dim, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (s.videoCodec.isNotEmpty()) Tag(s.videoCodec)
-            if (s.isDolbyVision) Tag("DV") else if (s.isHDR) Tag("HDR")
-            if (s.isAtmos) Tag("ATMOS") else if (s.channelsLabel.isNotEmpty()) Tag(s.channelsLabel)
-            if (s.audioCodec.isNotEmpty()) Tag(s.audioCodec)
-            if (s.isReady) Tag("⚡ Pronta")
+        Spacer(Modifier.width(14.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            if (s.sizeLabel.isNotEmpty()) Text(s.sizeLabel, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            s.neededMbps(runtime)?.let { Text("$it Mbps", color = C.dim, fontSize = 12.sp) }
         }
     }
 }
 
+/** Etichetta in vetro chiaro, come accanto al titolo nella scheda del film. */
 @Composable
 private fun Tag(t: String) {
-    Text(t, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-        modifier = Modifier.background(Color(0x33FFFFFF), RoundedCornerShape(5.dp)).padding(horizontal = 7.dp, vertical = 2.dp))
+    Box(
+        Modifier.height(24.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x2EFFFFFF))
+            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center
+    ) { Text(t, color = Color(0xEBFFFFFF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+}
+
+/** Logo Dolby (doppia D) con la scritta Vision / Atmos. */
+@Composable
+private fun DolbyLogo(sub: String) {
+    Column(Modifier.height(26.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.Canvas(Modifier.width(13.dp).height(11.dp)) {
+                val r = size.height / 2
+                val w = r                  // ogni D è larga metà della sua altezza
+                val gap = size.width - 2 * w
+                drawArc(Color.White, -90f, 180f, true, topLeft = androidx.compose.ui.geometry.Offset(-r, 0f),
+                    size = androidx.compose.ui.geometry.Size(2 * r, 2 * r))
+                drawArc(Color.White, 90f, 180f, true, topLeft = androidx.compose.ui.geometry.Offset(w + gap + w - r, 0f),
+                    size = androidx.compose.ui.geometry.Size(2 * r, 2 * r))
+            }
+            Spacer(Modifier.width(3.dp))
+            Text("Dolby", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, lineHeight = 13.sp)
+        }
+        Text(sub, color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, lineHeight = 8.sp)
+    }
 }
