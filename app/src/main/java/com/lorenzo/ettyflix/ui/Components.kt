@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.launch
 import com.lorenzo.ettyflix.data.MediaItem
 import com.lorenzo.ettyflix.data.QualityBadges
 import com.lorenzo.ettyflix.data.TMDBImage
@@ -84,25 +85,54 @@ private val menuKeys = setOf(
     android.view.KeyEvent.KEYCODE_GUIDE, android.view.KeyEvent.KEYCODE_SETTINGS
 )
 
+/** Il tasto arriva dal telecomando della TV (HDMI-CEC) e non da quello della Fire TV?
+ *  I tasti CEC vengono "iniettati" dal sistema: non hanno un dispositivo fisico vero. */
+private fun fromTvRemote(n: android.view.KeyEvent): Boolean {
+    val d = n.device ?: return true
+    if (d.isVirtual || n.deviceId <= 0) return true
+    val name = d.name.lowercase()
+    return "cec" in name || "hdmi" in name
+}
+
 /** OK tenuto premuto (o tasto ☰ / Play-Pausa / Info / tasti colorati): apre il menu dell'elemento.
- *  La pressione lunga si riconosce sia dalle ripetizioni del tasto (telecomando Fire TV) sia dalla
- *  durata tra pressione e rilascio (telecomandi delle TV, che non ripetono il tasto). */
-fun Modifier.onMenuKey(action: () -> Unit): Modifier = composed {
+ *  - Telecomando Fire TV: la pressione lunga si riconosce dalle ripetizioni del tasto.
+ *  - Telecomandi delle TV (CEC): non mandano la pressione lunga in modo affidabile (spesso mandano tanti
+ *    clic veloci). Se [onClick] è indicato, il clic parte dopo un attimo: se nel frattempo arriva un altro OK
+ *    (tasto tenuto premuto o doppio clic) si apre il menu invece della pagina. */
+fun Modifier.onMenuKey(onClick: (() -> Unit)? = null, action: () -> Unit): Modifier = composed {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var longPressed by remember { mutableStateOf(false) }
     var downAt by remember { mutableStateOf(0L) }
+    var pending by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var second by remember { mutableStateOf(false) }
     onPreviewKeyEvent {
         val n = it.nativeKeyEvent
         val ok = n.keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || n.keyCode == android.view.KeyEvent.KEYCODE_ENTER
+                || n.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+        val down = it.type == KeyEventType.KeyDown
+        val up = it.type == KeyEventType.KeyUp
         when {
-            n.keyCode in menuKeys -> { if (it.type == KeyEventType.KeyDown && n.repeatCount == 0) action(); true }
-            ok && it.type == KeyEventType.KeyDown && n.repeatCount == 0 -> { downAt = n.eventTime; longPressed = false; false }
-            ok && it.type == KeyEventType.KeyDown && n.repeatCount > 0 -> {
-                if (!longPressed && n.repeatCount >= 2) { longPressed = true; action() }
+            n.keyCode in menuKeys -> { if (down && n.repeatCount == 0) { pending?.cancel(); pending = null; action() }; true }
+            !ok -> false
+            down && n.repeatCount == 0 -> {
+                if (pending?.isActive == true) { pending?.cancel(); pending = null; second = true }
+                else { second = false }
+                downAt = n.eventTime; longPressed = false
+                onClick != null         // gestisco io il clic (altrimenti lo fa clickable)
+            }
+            down -> {
+                if (!longPressed && !second && n.repeatCount >= 2) { longPressed = true; action() }
                 true   // finché tengo premuto non parte il clic normale
             }
-            ok && it.type == KeyEventType.KeyUp && longPressed -> { longPressed = false; true }
-            ok && it.type == KeyEventType.KeyUp && downAt > 0 && n.eventTime - downAt >= 600 -> {
-                downAt = 0; action(); true     // tenuto premuto a lungo senza ripetizioni: menu, non clic
+            up && longPressed -> { longPressed = false; true }
+            up && second -> { second = false; action(); true }   // secondo OK subito dopo il primo: menu
+            up && downAt > 0 && n.eventTime - downAt >= 600 -> { downAt = 0; action(); true }
+            up && onClick != null -> {
+                downAt = 0
+                if (fromTvRemote(n)) {
+                    pending = scope.launch { kotlinx.coroutines.delay(450); pending = null; onClick() }
+                } else onClick()
+                true
             }
             else -> false
         }
@@ -130,7 +160,7 @@ fun FocusBox(
             .shadow(if (focused) 18.dp else 0.dp, shape)
             .clip(shape)
             .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, shape)
-            .let { m -> if (onMenu != null) m.onMenuKey(onMenu) else m }
+            .let { m -> if (onMenu != null) m.onMenuKey(onClick, onMenu) else m }
             .clickable(interactionSource = src, indication = null, onClick = onClick)
     ) { content(focused) }
 }

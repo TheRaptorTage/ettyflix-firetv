@@ -355,7 +355,7 @@ private fun ChannelRow(c: LiveChannel) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
         .background(if (f) Color(0xFF3A3F4B) else Color(0xFF1C2028))
         .border(if (f) 2.dp else 0.dp, if (f) Color.White else Color.Transparent, RoundedCornerShape(12.dp))
-        .onMenuKey {
+        .onMenuKey(onClick = { Nav.push(Screen.LivePlayer(c)) }) {
             Nav.menu = MenuReq(c.name, null, listOf(
                 "Guarda" to { Nav.push(Screen.LivePlayer(c)) },
                 (if (LiveTV.isFavorite(c)) "Togli dai preferiti" else "Aggiungi ai preferiti") to { LiveTV.toggleFavorite(c) }

@@ -41,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -147,6 +148,18 @@ private fun ScreenContent(s: Screen) {
 @Composable
 private fun Sidebar() {
     var expanded by remember { mutableStateOf(false) }
+    var hasFocus by remember { mutableStateOf(false) }
+    // Quando si apre una pagina il cursore può passare un attimo dal menu laterale prima di arrivare
+    // sulla pagina: in quel momento non lo apro, così non "lampeggia".
+    val navAt by androidx.compose.runtime.rememberUpdatedState(
+        remember(Nav.stack.size, Nav.top, Nav.menu == null) { android.os.SystemClock.uptimeMillis() })
+    LaunchedEffect(hasFocus) {
+        if (hasFocus) {
+            val wait = 700 - (android.os.SystemClock.uptimeMillis() - navAt)
+            if (wait > 0) delay(wait)
+        }
+        expanded = hasFocus
+    }
     val p = Profiles.current
     Column(
         Modifier
@@ -157,7 +170,7 @@ private fun Sidebar() {
                 if (expanded) Brush.horizontalGradient(listOf(Color(0xF0101318), Color(0xD9101318)))
                 else Brush.horizontalGradient(listOf(Color(0xCC0B0D11), Color(0x990B0D11)))
             )
-            .onFocusChanged { expanded = it.hasFocus }
+            .onFocusChanged { hasFocus = it.hasFocus }
             .padding(vertical = 22.dp, horizontal = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -222,7 +235,16 @@ private fun MediaMenu(req: MenuReq) {
     val first = remember { FocusRequester() }
     val item = req.item
     fun close() { Nav.menu = null }
-    Box(Modifier.fillMaxSize().background(Color(0xB3000000)), contentAlignment = Alignment.Center) {
+    val openedAt = remember { android.os.SystemClock.uptimeMillis() }
+    Box(Modifier.fillMaxSize().background(Color(0xB3000000))
+        // Subito dopo l'apertura ignoro OK: con il telecomando della TV arrivano ancora i clic
+        // del tasto tenuto premuto e sceglierebbero da soli la prima voce.
+        .onPreviewKeyEvent {
+            val n = it.nativeKeyEvent
+            val ok = n.keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || n.keyCode == android.view.KeyEvent.KEYCODE_ENTER
+                    || n.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+            ok && n.eventTime - openedAt < 800
+        }, contentAlignment = Alignment.Center) {
         Column(
             Modifier.width(380.dp).background(C.panel, RoundedCornerShape(20.dp))
                 .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp)).padding(22.dp),
