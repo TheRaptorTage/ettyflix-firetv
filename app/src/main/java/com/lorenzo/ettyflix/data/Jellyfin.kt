@@ -51,8 +51,12 @@ data class StreamSource(
     val fileName: String,
     val audioCodec: String,
     val audioChannels: Int,
-    val url: String?
+    val url: String?,
+    /** da dove arriva la fonte ("Addon di riserva" = dal server di riserva) */
+    val origin: String = ""
 ) {
+    val isBackup: Boolean get() = origin.contains("riserva")
+
     private val text: String get() = "$title $fileName".lowercase()
     private fun has(p: String) = Regex(p).containsMatchIn(text)
 
@@ -292,8 +296,20 @@ object Jellyfin {
     }
 
     /** Tutte le fonti di un film o episodio. [progress] riceve i risultati man mano. */
+    /** Il principale prima; se non trova nessuna fonte (es. è giù) chiedo all'addon di riserva.
+     *  Ogni ricerca riparte dal principale, quindi appena torna a funzionare si usa di nuovo lui. */
     suspend fun allSources(m: MediaItem, season: Int?, episode: Int?, fresh: Boolean = false,
-                           progress: (suspend (List<StreamSource>) -> Unit)? = null): List<StreamSource> = coroutineScope {
+                           progress: (suspend (List<StreamSource>) -> Unit)? = null): List<StreamSource> {
+        val first = runCatching { allSourcesOnServer(m, season, episode, fresh, progress) }.getOrDefault(emptyList())
+        if (first.any { !it.isError } || !BackupAddon.isConfigured) return first
+        val backup = runCatching { BackupAddon.sources(m, season, episode) }.getOrDefault(emptyList())
+        if (backup.isEmpty()) return first
+        progress?.invoke(backup)
+        return backup
+    }
+
+    private suspend fun allSourcesOnServer(m: MediaItem, season: Int?, episode: Int?, fresh: Boolean,
+                           progress: (suspend (List<StreamSource>) -> Unit)?): List<StreamSource> = coroutineScope {
         var items = findAllItems(m)
         val strict = items.filter { it.obj("ProviderIds").str("Tmdb") == m.tmdbID.toString() }
         items = if (strict.isEmpty()) items.take(1) else strict.take(6)

@@ -156,6 +156,14 @@ private fun SourceRow(s: StreamSource, runtime: Int?, modifier: Modifier, onClic
                 Text(if (s.isError) "Errore della fonte" else s.addonName, color = Color.White, fontSize = 17.sp,
                     fontWeight = FontWeight.Bold, maxLines = 1)
                 if (s.isReady) Text("  ⚡", color = Color(0xFFFFD60A), fontSize = 14.sp)
+                if (s.isBackup) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.height(20.dp).clip(RoundedCornerShape(50)).background(Color(0x55FF9F0A))
+                        .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(50)).padding(horizontal = 8.dp),
+                        contentAlignment = Alignment.Center) {
+                        Text("Riserva", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
             Spacer(Modifier.height(8.dp))
             // le etichette vanno a capo invece di rimpicciolirsi
