@@ -135,27 +135,7 @@ data class StreamSource(
     }
 
     /** Nome dell'addon che ha trovato la fonte (Meteor, Comet, MediaFusion…), preso dalla descrizione. */
-    val addonName: String get() {
-        val known = listOf(
-            "meteor" to "Meteor", "comet" to "Comet", "mediafusion" to "MediaFusion", "torrentio" to "Torrentio",
-            "jackettio" to "Jackettio", "stremthru" to "StremThru", "peerflix" to "Peerflix",
-            "corsaroviola" to "CorsaroViola", "corsaro viola" to "CorsaroViola", "corsaronero" to "Il Corsaro Nero",
-            "corsaro nero" to "Il Corsaro Nero", "knightcrawler" to "KnightCrawler", "orion" to "Orion",
-            "easynews" to "Easynews", "debridio" to "Debridio", "zilean" to "Zilean", "sootio" to "Sootio",
-            "streamingcommunity" to "StreamingCommunity", "mammamia" to "MammaMia", "animeworld" to "AnimeWorld",
-            "guardaserie" to "GuardaSerie", "mircrew" to "MIRCrew", "knaben" to "Knaben"
-        )
-        val t = title.lowercase()
-        known.mapNotNull { (k, n) -> t.indexOf(k).takeIf { it >= 0 }?.let { it to n } }.minByOrNull { it.first }?.let { return it.second }
-        if (t.contains("torbox")) return "TorBox"
-        var first = title.lines().firstOrNull() ?: ""
-        first = first.replace(Regex("\\[[^\\]]*\\]"), " ").substringBefore("|")
-        val clean = first.filter { it.isLetterOrDigit() || it == ' ' }
-        val drop = setOf("tb", "rd", "ad", "pm", "dl", "ed", "oc", "cached", "instant", "uncached",
-            "2160p", "1440p", "1080p", "1080i", "720p", "576p", "480p", "4k", "uhd", "hd", "sd", "p")
-        val name = clean.split(" ").filter { it.isNotBlank() && it.lowercase() !in drop }.take(3).joinToString(" ")
-        return if (name.isEmpty()) "Jellyfin" else name.take(28)
-    }
+    val addonName: String get() = addonNameOf(title)
 
     /** Velocità che serve (Mbps): quella media del file con un margine del 25%. */
     fun neededMbps(runtime: Int?): Int? {
@@ -463,7 +443,12 @@ object SourceMatcher {
         "streamingcommunity", "guardaserie", "mammamia", "animeworld", "peerflix", "jackett", "zilean", "torbox", "meteor",
         "realdebrid", "real-debrid", "alldebrid", "premiumize", "easynews", "usenet", "mircrew", "rlsbb")
 
-    fun provider(text: String): String? { val t = text.lowercase(); return providers.firstOrNull { t.contains(it) }?.replace(" ", "") }
+    fun provider(text: String): String? {
+        // stesso nome che si vede nell'elenco delle fonti (Meteor, CorsaroViola, Knaben…)
+        val name = addonNameOf(text)
+        if (name != "Jellyfin" && name != "TorBox") return name.lowercase()
+        val t = text.lowercase(); return providers.firstOrNull { t.contains(it) }?.replace(" ", "")
+    }
 
     fun group(fileName: String): String? =
         Regex("-([A-Za-z0-9]{2,20})$").find(fileName.substringBeforeLast("."))?.groupValues?.get(1)?.lowercase()
@@ -483,7 +468,8 @@ object SourceMatcher {
         var best = 0; var bestScore = 0
         list.forEachIndexed { i, s ->
             var score = 0
-            if (curProv != null && provider(s.title + " " + s.fileName) == curProv) score += 8
+            // stessa fonte (es. Meteor) prima di tutto: vince sempre su una release simile di un'altra fonte
+            if (curProv != null && provider(s.title + " " + s.fileName) == curProv) score += 30
             if (curGroup != null && group(s.fileName) == curGroup) score += 6
             if (current.resolution.isNotEmpty() && s.resolutionLabel == current.resolution) score += 4
             if (current.codec.isNotEmpty() && s.videoCodec == current.codec) score += 2
@@ -492,4 +478,27 @@ object SourceMatcher {
         }
         return best
     }
+}
+
+/** Nome dell'addon (Meteor, CorsaroViola…) da una descrizione qualsiasi. */
+fun addonNameOf(title: String): String {
+    val known = listOf(
+        "meteor" to "Meteor", "comet" to "Comet", "mediafusion" to "MediaFusion", "torrentio" to "Torrentio",
+        "jackettio" to "Jackettio", "stremthru" to "StremThru", "peerflix" to "Peerflix",
+        "corsaroviola" to "CorsaroViola", "corsaro viola" to "CorsaroViola", "corsaronero" to "Il Corsaro Nero",
+        "corsaro nero" to "Il Corsaro Nero", "knightcrawler" to "KnightCrawler", "orion" to "Orion",
+        "easynews" to "Easynews", "debridio" to "Debridio", "zilean" to "Zilean", "sootio" to "Sootio",
+        "streamingcommunity" to "StreamingCommunity", "mammamia" to "MammaMia", "animeworld" to "AnimeWorld",
+        "guardaserie" to "GuardaSerie", "mircrew" to "MIRCrew", "knaben" to "Knaben"
+    )
+    val t = title.lowercase()
+    known.mapNotNull { (k, n) -> t.indexOf(k).takeIf { it >= 0 }?.let { it to n } }.minByOrNull { it.first }?.let { return it.second }
+    if (t.contains("torbox")) return "TorBox"
+    var first = title.lines().firstOrNull() ?: ""
+    first = first.replace(Regex("\\[[^\\]]*\\]"), " ").substringBefore("|")
+    val clean = first.filter { it.isLetterOrDigit() || it == ' ' }
+    val drop = setOf("tb", "rd", "ad", "pm", "dl", "ed", "oc", "cached", "instant", "uncached",
+        "2160p", "1440p", "1080p", "1080i", "720p", "576p", "480p", "4k", "uhd", "hd", "sd", "p")
+    val name = clean.split(" ").filter { it.isNotBlank() && it.lowercase() !in drop }.take(3).joinToString(" ")
+    return if (name.isEmpty()) "Jellyfin" else name.take(28)
 }

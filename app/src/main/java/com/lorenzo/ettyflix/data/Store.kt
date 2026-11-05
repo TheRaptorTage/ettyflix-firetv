@@ -181,6 +181,12 @@ object Store {
         Trakt.pushWatchlist(m, adding)
     }
 
+    /** Watchlist uguale a quella dell'account Trakt del profilo (una volta sola). */
+    fun replaceWatchlist(items: List<MediaItem>) {
+        val l = items.distinctBy { it.id }
+        watchlist = l; saveList(l, Profiles.file("watchlist.json"))
+    }
+
     fun mergeWatchlist(items: List<MediaItem>) {
         val cur = watchlist.toMutableList()
         var changed = false
@@ -298,6 +304,20 @@ object WatchProgress {
         save()
         if (finished && !wasFinished) Trakt.pushWatched(listOf(e), true)
         if (!finished) Trakt.pushProgress(e)
+    }
+
+    /** Progressi uguali a quelli dell'account Trakt del profilo (una volta sola). Restano quelli delle ultime 2 ore. */
+    fun replaceEntries(list: List<WatchEntry>) {
+        val recent = nowRef() - 2 * 3600
+        val map = HashMap<String, WatchEntry>()
+        for (e in entries.values) if (e.updated > recent) map[e.id] = e
+        for (e in list) {
+            val cur = map[e.id]
+            if (cur != null && cur.updated >= e.updated) continue
+            map[e.id] = e
+        }
+        entries.clear(); entries.putAll(map)
+        save()
     }
 
     fun importEntries(list: List<WatchEntry>) {

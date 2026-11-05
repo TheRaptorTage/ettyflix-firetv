@@ -53,7 +53,13 @@ object Trakt {
         expiresAt = p.getLong(Profiles.key("trakt_expires_at_ms"), 0)
         username = p.getString(Profiles.key("trakt_username"), null)
         lastScrobble.clear()
+        // la sincronizzazione del profilo precedente (se in corso) non scrive più niente
+        syncGen++
+        busy = false
     }
+
+    /** Cambia a ogni cambio di profilo: una sincronizzazione non scrive mai nei dati di un altro profilo. */
+    @Volatile private var syncGen = 0
 
     fun saveClientID(id: String) {
         clientID = id.trim()
@@ -213,6 +219,10 @@ object Trakt {
     suspend fun syncAll() {
         if (!isLoggedIn || busy) return
         busy = true
+        val gen = syncGen
+        val owner = Profiles.currentID
+        fun same() = gen == syncGen && Profiles.currentID == owner
+        var complete = true
         try {
             (json("/sync/last_activities", auth = true) as? JSONObject)?.str("all")?.let { syncedStamp = it }
             val imported = mutableListOf<WatchEntry>()
@@ -225,7 +235,10 @@ object Trakt {
                 return d
             }
             status = "Trakt: film visti…"
-            (json("/sync/watched/movies", auth = true) as? JSONArray)?.objects()?.forEach { m ->
+            val moviesJ = json("/sync/watched/movies", auth = true) as? JSONArray
+            if (moviesJ == null) complete = false
+            if (!same()) return
+            moviesJ?.objects()?.forEach { m ->
                 val id = m.obj("movie").obj("ids").int("tmdb") ?: return@forEach
                 val d = detail("movie", id)
                 val dur = ((d?.runtime ?: 100) * 60).toDouble()
@@ -233,7 +246,10 @@ object Trakt {
                     d?.item?.posterPath, d?.item?.backdropPath, d?.logoPath, null, null, "", null, dur, dur, isoToRef(m.str("last_watched_at")), true)
             }
             status = "Trakt: serie viste…"
-            (json("/sync/watched/shows", auth = true) as? JSONArray)?.objects()?.forEach { sh ->
+            val showsJ = json("/sync/watched/shows", auth = true) as? JSONArray
+            if (showsJ == null) complete = false
+            if (!same()) return
+            showsJ?.objects()?.forEach { sh ->
                 val id = sh.obj("show").obj("ids").int("tmdb") ?: return@forEach
                 val d = detail("tv", id)
                 val dur = ((d?.runtime ?: 45) * 60).toDouble()
@@ -247,7 +263,10 @@ object Trakt {
                 }
             }
             status = "Trakt: progressi…"
-            (json("/sync/playback", auth = true) as? JSONArray)?.objects()?.forEach { p ->
+            val playbackJ = json("/sync/playback", auth = true) as? JSONArray
+            if (playbackJ == null) complete = false
+            if (!same()) return
+            playbackJ?.objects()?.forEach { p ->
                 val pct = (p.dbl("progress") ?: 0.0) / 100
                 val whenRef = isoToRef(p.str("paused_at"))
                 if (p.str("type") == "movie") {
@@ -267,19 +286,35 @@ object Trakt {
                         dur * pct, dur, whenRef, false)
                 }
             }
-            withContext(Dispatchers.Main) { WatchProgress.importEntries(imported) }
+            if (!same()) return
             status = "Trakt: watchlist…"
             val wl = mutableListOf<MediaItem>()
             for ((path, type, key) in listOf(Triple("/sync/watchlist/movies", "movie", "movie"), Triple("/sync/watchlist/shows", "tv", "show"))) {
-                (json(path, auth = true) as? JSONArray)?.objects()?.forEach { it ->
+                val listJ = json(path, auth = true) as? JSONArray
+                if (listJ == null) complete = false
+                listJ?.objects()?.forEach { it ->
                     val id = it.obj(key).obj("ids").int("tmdb") ?: return@forEach
                     detail(type, id)?.let { d -> wl += d.item }
                 }
             }
-            withContext(Dispatchers.Main) { Store.mergeWatchlist(wl) }
+            if (!same()) return
+            // Una volta per profilo: dati riallineati al suo account Trakt (spariscono i titoli finiti per
+            // errore nel profilo sbagliato). Solo se la sincronizzazione è riuscita tutta.
+            val repairKey = Profiles.key("trakt_profile_repair_v1")
+            val repair = complete && !EttyFlixApp.prefs.getBoolean(repairKey, false)
+            withContext(Dispatchers.Main) {
+                if (repair) {
+                    WatchProgress.replaceEntries(imported)
+                    Store.replaceWatchlist(wl)
+                    EttyFlixApp.prefs.edit().putBoolean(repairKey, true).apply()
+                } else {
+                    WatchProgress.importEntries(imported)
+                    Store.mergeWatchlist(wl)
+                }
+            }
             status = "Sincronizzato: ${imported.size} elementi, ${wl.size} in watchlist."
         } finally {
-            busy = false
+            if (gen == syncGen) busy = false
         }
     }
 
