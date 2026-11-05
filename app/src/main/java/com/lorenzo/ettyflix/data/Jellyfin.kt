@@ -432,7 +432,7 @@ object SourceCache {
     fun key(m: MediaItem, s: Int?, e: Int?) = "${m.id}-${s ?: 0}-${e ?: 0}"
     fun get(m: MediaItem, s: Int?, e: Int?): List<StreamSource>? {
         val c = cache[key(m, s, e)] ?: return null
-        return if (System.currentTimeMillis() - c.first < 4 * 60_000 && c.second.isNotEmpty()   // i link dei servizi scadono: solo fonti recenti) c.second else null
+        return if (System.currentTimeMillis() - c.first < 4 * 60_000 && c.second.isNotEmpty()) c.second else null   // i link scadono: solo fonti recenti
     }
     fun put(m: MediaItem, s: Int?, e: Int?, list: List<StreamSource>) {
         if (list.isNotEmpty()) cache[key(m, s, e)] = System.currentTimeMillis() to list
