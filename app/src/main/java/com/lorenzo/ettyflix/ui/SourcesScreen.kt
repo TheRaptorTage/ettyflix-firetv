@@ -175,7 +175,7 @@ private fun SourceRow(s: StreamSource, runtime: Int?, modifier: Modifier, onClic
                 s.videoBadge?.let { Tag(it) }
                 if (s.releaseRank == 0) Tag("Remux")
                 if (s.hasItalianAudio) Tag("Italiano")
-                if (s.hasItalianSubs) Tag("Sub ITA")
+                if (s.hasItalianSubs) Tag("Sottotitolato")
                 if (s.isPack) Tag("Pacchetto stagione")
             }
         }

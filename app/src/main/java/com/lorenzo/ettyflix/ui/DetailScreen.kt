@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -324,7 +325,10 @@ private fun CastCard(c: CastMember) {
 
 @Composable
 private fun InfoGrid(d: MediaDetail) {
-    Column(Modifier.padding(start = C.pad, end = C.pad, top = 24.dp)) {
+    // Selezionabile (senza bordo): scendendo col telecomando la pagina scorre fino in fondo
+    // e le informazioni si leggono tutte.
+    Column(Modifier.padding(start = C.pad, end = C.pad, top = 24.dp, bottom = 40.dp)
+        .focusable(interactionSource = remember { MutableInteractionSource() })) {
         Text("Informazioni", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(10.dp))
         d.info.chunked(3).forEach { row ->
