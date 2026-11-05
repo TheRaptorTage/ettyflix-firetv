@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
@@ -93,6 +94,7 @@ private suspend fun seriesTarget(item: MediaItem, seasons: List<Int>): Target {
 @Composable
 fun DetailScreen(start: MediaItem) {
     var detail by remember { mutableStateOf<MediaDetail?>(null) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var season by remember { mutableIntStateOf(-1) }
     var episodes by remember { mutableStateOf(listOf<Episode>()) }
     var imdb by remember { mutableStateOf<Double?>(null) }
@@ -187,6 +189,9 @@ fun DetailScreen(start: MediaItem) {
                             PillButton(if (pos != null) "Riprendi" else "Riproduci", Icons.Filled.PlayArrow, Modifier.focusRequester(playFocus), primary = true) { playMovie() }
                         }
                         PillButton(icon = if (Store.inWatchlist(item)) Icons.Filled.Check else Icons.Filled.Add) { Store.toggleWatchlist(item) }
+                        detail?.trailerKey?.let { key ->
+                            PillButton("Trailer", Icons.Filled.Movie) { openTrailer(ctx, key) }
+                        }
                         if (!isTV) {
                             val watched = WatchProgress.isWatched(item.tmdbID, "movie")
                             PillButton(icon = if (watched) Icons.Filled.VisibilityOff else Icons.Filled.Visibility) {
@@ -364,5 +369,17 @@ private fun SeasonRatingsDialog(item: MediaItem, onClose: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             PillButton("Chiudi", modifier = Modifier.focusRequester(close)) { onClose() }
         }
+    }
+}
+
+
+/** Apre il trailer nell'app YouTube (come su Apple TV); se non c'è, nel browser. */
+fun openTrailer(ctx: android.content.Context, key: String) {
+    val app = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("vnd.youtube:$key"))
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    val web = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=$key"))
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    try { ctx.startActivity(app) } catch (e: Exception) {
+        try { ctx.startActivity(web) } catch (_: Exception) {}
     }
 }
