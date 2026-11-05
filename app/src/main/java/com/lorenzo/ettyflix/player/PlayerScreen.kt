@@ -198,6 +198,10 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
     var seekOffset by remember { mutableDoubleStateOf(0.0) }
     var note by remember { mutableStateOf("") }
     var retriedSame by remember { mutableIntStateOf(-1) }
+    /** sto chiedendo al server link nuovi per la fonte che non parte */
+    var renewing by remember { mutableStateOf(false) }
+    var loadAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var nextReadyAt by remember { mutableLongStateOf(0L) }
     var segments by remember { mutableStateOf(listOf<SkipSegment>()) }
     var failed by remember { mutableStateOf(setOf<Int>()) }
     var expiredTried by remember { mutableStateOf(false) }
@@ -213,6 +217,7 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         val s = srcList.getOrNull(i) ?: return
         index = i
         started = false
+        loadAt = System.currentTimeMillis()
         player.setMediaItem(ExoItem.fromUri(s.url), (at * 1000).toLong())
         player.prepare()
         player.play()
@@ -246,18 +251,57 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
     fun playNextEpisode() {
         val n = nextReady ?: return
         save()
+        // fonti cercate molti minuti fa: i link possono essere scaduti, le cerco di nuovo
+        if (System.currentTimeMillis() - nextReadyAt > 6 * 60_000) {
+            note = "Cerco le fonti dell'episodio successivo…"
+            scope.launch {
+                val r = n.first
+                val found = withTimeoutOrNull(30_000) { Jellyfin.allSources(r.media, r.season, r.episode) }
+                val sorted = Jellyfin.sorted(found ?: emptyList()).filter { !it.isError && it.url != null }
+                if (sorted.isNotEmpty()) {
+                    SourceCache.put(r.media, r.season, r.episode, sorted)
+                    val pick = SourceMatcher.pickIndex(sorted, srcList.getOrNull(index))
+                    val ordered = listOf(sorted[pick]) + sorted.filterIndexed { i, _ -> i != pick }
+                    Nav.replaceTop(Screen.Player(r, ordered.map { it.toPlayer() }, 0))
+                } else Nav.replaceTop(Screen.Player(r, n.second, 0))
+            }
+            return
+        }
         Nav.replaceTop(Screen.Player(n.first, n.second, 0))
+    }
+
+    /** La fonte non parte: il link è quasi sempre vecchio. Chiedo al server link nuovi (come "Cerca di nuovo")
+     *  e riparto dalla stessa fonte; se non ne dà, passo alla fonte successiva. */
+    fun renewOrNext() {
+        if (renewing) return
+        if (retriedSame == index) { tryNext("La fonte non funziona, provo la successiva…"); return }
+        retriedSame = index
+        renewing = true
+        note = "Rinnovo il link della fonte…"
+        val before = srcList.getOrNull(index)?.url
+        scope.launch {
+            SourceCache.clear(req.media, req.season, req.episode)
+            val found = withTimeoutOrNull(40_000) { Jellyfin.allSources(req.media, req.season, req.episode, fresh = true) }
+            val sorted = Jellyfin.sorted(found ?: emptyList()).filter { !it.isError && it.url != null }
+            renewing = false
+            if (started || srcList.getOrNull(index)?.url != before) return@launch   // nel frattempo è partita o hai cambiato fonte
+            if (sorted.isNotEmpty()) {
+                SourceCache.put(req.media, req.season, req.episode, sorted)
+                val pick = SourceMatcher.pickIndex(sorted, srcList.getOrNull(index))
+                srcList = sorted.map { it.toPlayer() }
+                failed = emptySet()
+                retriedSame = pick
+                note = "Link rinnovato, riparto…"
+                load(pick, position.coerceAtLeast(req.startAt))
+            } else tryNext("La fonte non funziona, provo la successiva…")
+        }
     }
 
     DisposableEffect(Unit) {
         val l = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                // Prima riprovo la stessa fonte (spesso il servizio la stava ancora preparando), poi passo alla successiva
-                if (!started && retriedSame != index) {
-                    retriedSame = index
-                    note = "Riprovo la stessa sorgente…"
-                    load(index, position.coerceAtLeast(req.startAt))
-                } else tryNext("La fonte non funziona, provo la successiva…")
+                // Prima chiedo link nuovi per la stessa fonte, poi passo alla successiva
+                if (!started) renewOrNext() else tryNext("La fonte non funziona, provo la successiva…")
             }
             override fun onTracksChanged(tracks: Tracks) { trackTick++ }
             override fun onPlaybackStateChanged(state: Int) {
@@ -293,6 +337,8 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
             playing = player.isPlaying
             buffering = player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_IDLE
             if (player.isPlaying && !started) { started = true; note = "" }
+            // ferma da 30 secondi senza partire: link vecchio, lo rinnovo
+            if (!started && !renewing && System.currentTimeMillis() - loadAt > 30_000) renewOrNext()
             if (showControls && playing && !panel && System.currentTimeMillis() - lastActivity > (if (buttons) 8000 else 4000)) {
                 showControls = false; buttons = false
             }
@@ -354,6 +400,7 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         val ordered = listOf(sorted[pick]) + sorted.filterIndexed { i, _ -> i != pick }
         nextReady = req.copy(season = n.season, episode = n.number, episodeTitle = n.name, stillPath = n.stillPath,
             runtime = n.runtime ?: req.runtime, startAt = 0.0) to ordered.map { it.toPlayer() }
+        nextReadyAt = System.currentTimeMillis()
     }
 
     LaunchedEffect(Unit) { delay(100); runCatching { rootFocus.requestFocus() } }
