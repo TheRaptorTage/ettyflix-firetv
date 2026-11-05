@@ -159,10 +159,10 @@ object TMDB {
     // MARK: Dettaglio
 
     suspend fun detail(type: String, id: Int): MediaDetail? {
-        val append = if (type == "movie") "credits,videos,similar,recommendations,images,release_dates"
-                     else "credits,videos,similar,recommendations,images,content_ratings"
+        val append = if (type == "movie") "credits,videos,similar,recommendations,images,release_dates,external_ids"
+                     else "credits,videos,similar,recommendations,images,content_ratings,external_ids"
         val j = get("$type/$id", mapOf("append_to_response" to append, "include_image_language" to "it,en,null",
-            "include_video_language" to "it,en")) ?: return null
+            "include_video_language" to "it")) ?: return null
         val base = MediaItem.from(j, type) ?: return null
         val genres = j.arr("genres").mapNotNull { it.str("name") }
         var runtime = j.int("runtime")
@@ -192,8 +192,13 @@ object TMDB {
             .mapNotNull { c -> c.int("id")?.let { CastMember(it, c.str("name") ?: "", "Regista", c.str("profile_path")) } }.distinctBy { it.id }
         else j.arr("created_by").mapNotNull { c -> c.int("id")?.let { CastMember(it, c.str("name") ?: "", "Ideatore", c.str("profile_path")) } }
 
-        val vids = j.obj("videos").arr("results").filter { it.str("site") == "YouTube" }
-        val trailer = (vids.filter { it.str("type") == "Trailer" } + vids.filter { it.str("type") == "Teaser" }).firstOrNull()?.str("key")
+        // solo trailer in italiano; se TMDB non ne ha, li chiedo all'addon dei trailer (es. Streailer)
+        val vids = j.obj("videos").arr("results").filter { it.str("site") == "YouTube" && it.str("iso_639_1") == "it" }
+        var trailer = (vids.filter { it.str("type") == "Trailer" } + vids.filter { it.str("type") == "Teaser" }).firstOrNull()?.str("key")
+        if (trailer == null && TrailerAddon.isConfigured) {
+            val imdb = j.str("imdb_id") ?: j.obj("external_ids").str("imdb_id")
+            if (!imdb.isNullOrEmpty()) trailer = runCatching { TrailerAddon.firstTrailer(imdb, type) }.getOrNull()
+        }
 
         val seasons = if (type == "tv") j.arr("seasons").mapNotNull { s ->
             val sid = s.int("id") ?: return@mapNotNull null

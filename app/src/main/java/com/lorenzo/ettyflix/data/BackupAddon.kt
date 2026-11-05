@@ -77,3 +77,37 @@ object BackupAddon {
         return (num * if (gb) 1_000_000_000 else 1_000_000).toLong()
     }
 }
+
+/** Addon dei trailer (es. Streailer): si usa solo quando TMDB non ha nessun trailer in italiano. */
+object TrailerAddon {
+    private const val KEY = "trailer_addon_url"
+
+    var manifestURL: String
+        get() = EttyFlixApp.prefs.getString(KEY, "") ?: ""
+        set(v) { EttyFlixApp.prefs.edit().putString(KEY, v.trim()).apply() }
+
+    private val base: String? get() {
+        var s = manifestURL
+        if (s.isEmpty()) return null
+        if (s.startsWith("stremio://")) s = "https://" + s.removePrefix("stremio://")
+        s = s.removeSuffix("/manifest.json").trimEnd('/')
+        return if (s.startsWith("http")) s else null
+    }
+
+    val isConfigured: Boolean get() = base != null
+
+    private fun youtubeID(s: String): String? =
+        listOf("[?&]v=([A-Za-z0-9_-]{11})", "youtu\\.be/([A-Za-z0-9_-]{11})", "embed/([A-Za-z0-9_-]{11})", "shorts/([A-Za-z0-9_-]{11})")
+            .firstNotNullOfOrNull { Regex(it).find(s)?.groupValues?.get(1) }
+
+    suspend fun firstTrailer(imdb: String, type: String): String? {
+        val b = base ?: return null
+        val kind = if (type == "movie") "movie" else "series"
+        val r = Http.get("$b/stream/$kind/$imdb.json", timeoutSec = 12)
+        val j = if (r.ok) r.json() else null
+        j ?: return null
+        return j.arr("streams").firstNotNullOfOrNull { st ->
+            st.str("ytId") ?: st.str("externalUrl")?.let { youtubeID(it) } ?: st.str("url")?.let { youtubeID(it) }
+        }
+    }
+}

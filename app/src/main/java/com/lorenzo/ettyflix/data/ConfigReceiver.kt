@@ -146,6 +146,7 @@ object ConfigReceiver {
             obj.str("omdb")?.takeIf { it.isNotBlank() }?.let {
                 com.lorenzo.ettyflix.EttyFlixApp.prefs.edit().putString("omdb_api_key", it.trim()).apply(); done += "chiave OMDb"
             }
+            obj.str("trailerAddon")?.takeIf { it.isNotBlank() }?.let { TrailerAddon.manifestURL = it; done += "addon dei trailer" }
             obj.str("backupAddon")?.takeIf { it.isNotBlank() }?.let { BackupAddon.manifestURL = it; done += "addon di riserva" }
             obj.str("gemini")?.takeIf { it.isNotBlank() }?.let { AI.saveKey(it); done += "chiave Gemini" }
             obj.str("strand")?.takeIf { it.isNotEmpty() }?.let {
