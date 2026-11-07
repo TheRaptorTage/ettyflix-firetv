@@ -294,11 +294,17 @@ fun SearchScreen() {
 fun LibraryScreen() {
     var tab by rememberSaveable { mutableStateOf(0) }
     @Suppress("UNUSED_VARIABLE") val v = WatchProgress.version
-    val items = if (tab == 0) Store.watchlist else WatchProgress.history.map { it.media }
+    LaunchedEffect(Profiles.currentID, v) { runCatching { com.lorenzo.ettyflix.data.CompletedModel.refresh() } }
+    val items = when (tab) {
+        0 -> Store.watchlist
+        2 -> com.lorenzo.ettyflix.data.CompletedModel.items
+        else -> WatchProgress.history.map { it.media }
+    }
     PosterGrid("Libreria", items) {
         Row(Modifier.padding(start = C.pad, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Chip("Watchlist", tab == 0) { tab = 0 }
             Chip("Visti di recente", tab == 1) { tab = 1 }
+            Chip("Completati", tab == 2) { tab = 2 }
         }
     }
 }

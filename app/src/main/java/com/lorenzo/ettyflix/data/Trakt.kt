@@ -281,6 +281,20 @@ object Trakt {
         withContext(Dispatchers.Main) { WatchProgress.importEntries(out) }
     }
 
+    /** Tutta la cronologia dell'account (per le statistiche: uguale su tutti i dispositivi). */
+    suspend fun fullHistory(): List<JSONObject>? {
+        if (!isLoggedIn) return null
+        val out = ArrayList<JSONObject>()
+        for (page in 1..60) {
+            val arr = json("/sync/history?extended=full&limit=500&page=$page", auth = true) as? JSONArray
+                ?: return if (page == 1) null else out
+            if (arr.length() == 0) break
+            for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { out.add(it) }
+            if (arr.length() < 100) break
+        }
+        return out
+    }
+
     suspend fun syncAll() {
         if (!isLoggedIn || busy) return
         busy = true

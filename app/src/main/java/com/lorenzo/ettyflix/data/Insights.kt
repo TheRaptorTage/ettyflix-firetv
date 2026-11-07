@@ -168,15 +168,26 @@ data class StatsSummary(
     val hoursUnit: String get() = if (minutes >= 60) (if ((minutes / 60).toInt() == 1) "ora" else "ore") else "minuti"
 }
 
-/** Statistiche di visione del profilo attivo. */
+/** Una visione (film o episodio), dalla cronologia di Trakt o dai progressi. */
+data class StatsPlay(val type: String, val tmdbID: Int, val season: Int?, val episode: Int?, val title: String,
+                     val ms: Long, val minutes: Double, val finished: Boolean) {
+    val metaID get() = "$type-$tmdbID"
+    val playKey get() = if (type == "movie") "m$tmdbID" else "e$tmdbID-${season ?: 0}-${episode ?: 0}"
+}
+
+/** Statistiche di visione del profilo attivo: con Trakt uso tutta la cronologia dell'account,
+ *  così i numeri sono identici su Mac, Apple TV, iPhone e Fire Stick. */
 object StatsModel {
-    private data class Meta(val runtime: Int, val genres: List<String>)
+    private data class Meta(val runtime: Int, val genres: List<String>, val poster: String?)
     private val meta = HashMap<String, Meta>()
     var version by mutableStateOf(0)
         private set
     var loading by mutableStateOf(false)
         private set
     private const val KEY = "stats_meta_v1"
+    private var history: List<StatsPlay> = emptyList()
+    private var historyProfile = ""
+    private var historyAt = 0L
 
     init {
         runCatching {
@@ -184,15 +195,86 @@ object StatsModel {
             for (k in o.keys()) {
                 val m = o.getJSONObject(k)
                 val g = m.optJSONArray("g")
-                meta[k] = Meta(m.optInt("r"), (0 until (g?.length() ?: 0)).map { g!!.getString(it) })
+                meta[k] = Meta(m.optInt("r"), (0 until (g?.length() ?: 0)).map { g!!.getString(it) },
+                    m.optString("p", "").ifEmpty { null })
             }
         }
     }
 
-    private fun idOf(e: WatchEntry) = "${e.mediaType}-${e.tmdbID}"
+    private fun historyFile() = java.io.File(EttyFlixApp.instance.filesDir, Profiles.key("stats_history.json"))
+
+    private fun loadSavedHistory() {
+        if (historyProfile == Profiles.currentID) return
+        historyProfile = Profiles.currentID
+        historyAt = 0L
+        history = runCatching {
+            val arr = org.json.JSONArray(historyFile().readText())
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                StatsPlay(o.getString("t"), o.getInt("i"), o.optInt("s", -1).takeIf { it >= 0 }, o.optInt("e", -1).takeIf { it >= 0 },
+                    o.optString("n"), o.getLong("d"), o.optDouble("m", 0.0), true)
+            }
+        }.getOrDefault(emptyList())
+        version++
+    }
+
+    suspend fun refreshHistory(force: Boolean = false) {
+        loadSavedHistory()
+        if (!Trakt.isLoggedIn) return
+        if (!force && System.currentTimeMillis() - historyAt < 90_000) return
+        historyAt = System.currentTimeMillis()
+        val pid = Profiles.currentID
+        val raw = Trakt.fullHistory() ?: return
+        if (pid != Profiles.currentID) return
+        val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+        val out = ArrayList<StatsPlay>()
+        for (h in raw) {
+            val ms = runCatching { fmt.parse(h.optString("watched_at").take(19))!!.time }.getOrNull() ?: continue
+            if (h.optString("type") == "movie") {
+                val m = h.optJSONObject("movie") ?: continue
+                val id = m.optJSONObject("ids")?.optInt("tmdb", 0) ?: 0
+                if (id > 0) out.add(StatsPlay("movie", id, null, null, m.optString("title"), ms, m.optInt("runtime", 0).toDouble(), true))
+            } else if (h.optString("type") == "episode") {
+                val sh = h.optJSONObject("show") ?: continue
+                val ep = h.optJSONObject("episode") ?: continue
+                val id = sh.optJSONObject("ids")?.optInt("tmdb", 0) ?: 0
+                if (id > 0) out.add(StatsPlay("tv", id, ep.optInt("season"), ep.optInt("number"), sh.optString("title"), ms,
+                    ep.optInt("runtime", 0).toDouble(), true))
+            }
+        }
+        history = out
+        runCatching {
+            val arr = org.json.JSONArray()
+            out.forEach { p ->
+                arr.put(JSONObject().put("t", p.type).put("i", p.tmdbID).put("s", p.season ?: -1).put("e", p.episode ?: -1)
+                    .put("n", p.title).put("d", p.ms).put("m", p.minutes))
+            }
+            historyFile().writeText(arr.toString())
+        }
+        version++
+    }
+
+    private fun fromEntry(e: WatchEntry) = StatsPlay(e.mediaType, e.tmdbID, e.season, e.episode, e.title, refToMillis(e.updated),
+        if (e.finished) 0.0 else (if (e.duration > 60) minOf(e.position, e.duration) else e.position) / 60, e.finished)
+
+    /** cronologia di Trakt + quello che stai guardando a metà + quello finito qui che Trakt non ha ancora */
+    private fun plays(): List<StatsPlay> {
+        val h = if (historyProfile == Profiles.currentID) history else emptyList()
+        val entries = WatchProgress.entries.values
+        if (!Trakt.isLoggedIn || h.isEmpty()) return entries.filter { it.finished || it.position > 60 }.map { fromEntry(it) }
+        val known = h.map { it.playKey }.toHashSet()
+        val out = ArrayList(h)
+        for (e in entries) {
+            val p = fromEntry(e)
+            if (!e.finished && e.position > 60) out.add(p)
+            else if (e.finished && p.playKey !in known) out.add(p)
+        }
+        return out
+    }
 
     suspend fun loadMeta() {
-        val missing = WatchProgress.entries.values.map { idOf(it) }.toSet().filter { it !in meta }.take(400)
+        refreshHistory()
+        val missing = plays().map { it.metaID }.toSet().filter { it !in meta }.take(600)
         if (missing.isEmpty()) return
         loading = true
         try {
@@ -209,14 +291,14 @@ object StatsModel {
                                 .takeIf { it > 0 } ?: (j.optJSONObject("last_episode_to_air")?.optInt("runtime", 45) ?: 45)
                             else j.optInt("runtime", 0)
                             if (rt <= 0) rt = if (type == "tv") 45 else 110
-                            id to Meta(rt, genres)
+                            id to Meta(rt, genres, j.optString("poster_path", "").ifEmpty { null })
                         }
                     }
                 }.awaitAll().filterNotNull()
             }
             found.forEach { (k, v) -> meta[k] = v }
             val o = JSONObject()
-            meta.forEach { (k, v) -> o.put(k, JSONObject().put("r", v.runtime).put("g", org.json.JSONArray(v.genres))) }
+            meta.forEach { (k, v) -> o.put(k, JSONObject().put("r", v.runtime).put("g", org.json.JSONArray(v.genres)).put("p", v.poster ?: "")) }
             EttyFlixApp.prefs.edit().putString(KEY, o.toString()).apply()
             version++
         } finally {
@@ -224,15 +306,15 @@ object StatsModel {
         }
     }
 
-    /** Per i titoli finiti uso la durata di TMDB: uguale su tutti i dispositivi dopo la sincronizzazione con Trakt. */
-    private fun minutes(e: WatchEntry): Double {
-        if (e.finished) {
-            meta[idOf(e)]?.runtime?.let { return it.toDouble() }
-            if (e.duration > 60) return e.duration / 60
-            return if (e.mediaType == "tv") 45.0 else 110.0
-        }
-        return (if (e.duration > 60) minOf(e.position, e.duration) else e.position) / 60
+    private fun minutes(p: StatsPlay): Double {
+        if (p.minutes > 0) return p.minutes
+        if (!p.finished) return 0.0
+        meta[p.metaID]?.runtime?.let { return it.toDouble() }
+        return if (p.type == "tv") 45.0 else 110.0
     }
+
+    private fun poster(type: String, id: Int): String? = meta["$type-$id"]?.poster
+        ?: WatchProgress.entries.values.firstOrNull { it.tmdbID == id && it.mediaType == type }?.posterPath
 
     fun summary(period: StatsPeriod): StatsSummary {
         val start: Long? = when (period) {
@@ -240,29 +322,38 @@ object StatsModel {
             StatsPeriod.YEAR -> Calendar.getInstance().apply { set(Calendar.DAY_OF_YEAR, 1); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0) }.timeInMillis
             StatsPeriod.ALL -> null
         }
-        val watched = WatchProgress.entries.values.filter { it.finished || it.position > 60 }
-        val inPeriod = watched.filter { start == null || refToMillis(it.updated) >= start }
+        val all = plays()
+        val inPeriod = all.filter { start == null || it.ms >= start }
         var total = 0.0
-        var movies = 0
-        var episodes = 0
+        val movieIDs = HashSet<Int>()
+        val episodeKeys = HashSet<String>()
         val days = HashSet<String>()
         val series = HashSet<Int>()
         val genreMin = HashMap<String, Double>()
-        val seriesCount = HashMap<Int, Triple<WatchEntry, Int, Double>>()
+        val seriesTitle = HashMap<Int, String>()
+        val seriesEps = HashMap<Int, HashSet<String>>()
+        val seriesMin = HashMap<Int, Double>()
+        val lastMovie = HashMap<Int, StatsPlay>()
         val weekday = DoubleArray(7)
-        for (e in inPeriod) {
-            val m = minutes(e)
-            val dow = Calendar.getInstance().apply { timeInMillis = refToMillis(e.updated) }.get(Calendar.DAY_OF_WEEK)
-            weekday[(dow + 5) % 7] += m / 60   // 0 = lunedì
+        for (p in inPeriod) {
+            val m = minutes(p)
             total += m
-            days.add(isoDayOf(refToMillis(e.updated)))
-            if (e.mediaType == "movie") { if (e.finished) movies++ } else {
-                if (e.finished) episodes++
-                series.add(e.tmdbID)
-                val cur = seriesCount[e.tmdbID]
-                seriesCount[e.tmdbID] = Triple(cur?.first ?: e, (cur?.second ?: 0) + if (e.finished) 1 else 0, (cur?.third ?: 0.0) + m)
+            days.add(isoDayOf(p.ms))
+            val dow = Calendar.getInstance().apply { timeInMillis = p.ms }.get(Calendar.DAY_OF_WEEK)
+            weekday[(dow + 5) % 7] += m / 60   // 0 = lunedì
+            if (p.type == "movie") {
+                if (p.finished) {
+                    movieIDs.add(p.tmdbID)
+                    val cur = lastMovie[p.tmdbID]
+                    if (cur == null || cur.ms < p.ms) lastMovie[p.tmdbID] = p
+                }
+            } else {
+                series.add(p.tmdbID)
+                seriesTitle[p.tmdbID] = p.title
+                if (p.finished) { episodeKeys.add(p.playKey); seriesEps.getOrPut(p.tmdbID) { HashSet() }.add(p.playKey) }
+                seriesMin[p.tmdbID] = (seriesMin[p.tmdbID] ?: 0.0) + m
             }
-            meta[idOf(e)]?.genres?.forEach { g -> genreMin[g] = (genreMin[g] ?: 0.0) + m }
+            meta[p.metaID]?.genres?.forEach { g -> genreMin[g] = (genreMin[g] ?: 0.0) + m }
         }
         // ultimi 12 mesi
         val monthF = SimpleDateFormat("MMM", Locale.ITALIAN)
@@ -273,28 +364,89 @@ object StatsModel {
                 add(Calendar.MONTH, -back)
             }
             val c1 = (c0.clone() as Calendar).apply { add(Calendar.MONTH, 1) }
-            val h = watched.filter { refToMillis(it.updated) in c0.timeInMillis until c1.timeInMillis }.sumOf { minutes(it) } / 60
+            val h = all.filter { it.ms in c0.timeInMillis until c1.timeInMillis }.sumOf { minutes(it) } / 60
             StatCount(monthF.format(c0.time).replace(".", "").replaceFirstChar { it.uppercase() }, h,
                 monthFull.format(c0.time).replaceFirstChar { it.uppercase() })
         }
         // giorni di fila
-        val allDays = watched.map { isoDayOf(refToMillis(it.updated)) }.toSet()
+        val allDays = all.map { isoDayOf(it.ms) }.toSet()
         var streak = 0
         val d = Calendar.getInstance()
         if (isoDayOf(d.timeInMillis) !in allDays) d.add(Calendar.DAY_OF_MONTH, -1)
         while (isoDayOf(d.timeInMillis) in allDays) { streak++; d.add(Calendar.DAY_OF_MONTH, -1) }
+        val sortedGenres = genreMin.entries.sortedByDescending { it.value }.map { StatCount(it.key, it.value / 60) }
         return StatsSummary(
-            minutes = total, movies = movies, episodes = episodes, series = series.size,
+            minutes = total, movies = movieIDs.size, episodes = episodeKeys.size, series = series.size,
             activeDays = days.size, streak = streak, monthly = monthly,
-            genres = genreMin.entries.sortedByDescending { it.value }.take(6).map { StatCount(it.key, it.value / 60) },
-            allGenres = genreMin.entries.sortedByDescending { it.value }.map { StatCount(it.key, it.value / 60) },
+            genres = sortedGenres.take(6), allGenres = sortedGenres,
             weekdays = listOf("Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom").zip(
                 listOf("Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica")
             ).mapIndexed { i, (short, full) -> StatCount(short, weekday[i], full) },
-            topSeries = seriesCount.values.sortedWith(compareByDescending<Triple<WatchEntry, Int, Double>> { it.third }.thenByDescending { it.second })
-                .take(8).map { StatTop(it.first.tmdbID, it.first.title, it.first.posterPath, it.second, it.third) },
-            recentMovies = inPeriod.filter { it.mediaType == "movie" && it.finished }.sortedByDescending { it.updated }.take(12)
-                .map { StatTop(it.tmdbID, it.title, it.posterPath, 1, minutes(it)) }
+            topSeries = series.sortedWith(compareByDescending<Int> { seriesMin[it] ?: 0.0 }.thenByDescending { seriesEps[it]?.size ?: 0 })
+                .take(8).map { StatTop(it, seriesTitle[it] ?: "", poster("tv", it), seriesEps[it]?.size ?: 0, seriesMin[it] ?: 0.0) },
+            recentMovies = lastMovie.values.sortedByDescending { it.ms }.take(12)
+                .map { StatTop(it.tmdbID, it.title, poster("movie", it.tmdbID), 1, minutes(it)) }
         )
+    }
+}
+
+/** "Completati": film visti fino alla fine e serie con tutti gli episodi usciti visti. */
+object CompletedModel {
+    var items by mutableStateOf<List<MediaItem>>(emptyList())
+        private set
+    var loading by mutableStateOf(false)
+        private set
+    private const val KEY = "completed_aired_v1"
+    private val aired = HashMap<Int, Pair<Int, Long>>()
+
+    init {
+        runCatching {
+            val o = JSONObject(EttyFlixApp.prefs.getString(KEY, "{}") ?: "{}")
+            for (k in o.keys()) { val a = o.getJSONObject(k); aired[k.toInt()] = a.getInt("c") to a.getLong("t") }
+        }
+    }
+
+    private suspend fun airedCount(id: Int): Int? {
+        aired[id]?.let { if (System.currentTimeMillis() - it.second < 86_400_000) return it.first }
+        val j = TMDB.get("tv/$id") ?: return aired[id]?.first
+        val last = j.optJSONObject("last_episode_to_air") ?: return null
+        val lastS = last.optInt("season_number", 0)
+        val lastE = last.optInt("episode_number", 0)
+        if (lastS <= 0) return null
+        var count = 0
+        val seasons = j.optJSONArray("seasons")
+        for (i in 0 until (seasons?.length() ?: 0)) {
+            val s = seasons!!.getJSONObject(i)
+            val n = s.optInt("season_number", 0)
+            if (n in 1..lastS) count += if (n == lastS) lastE else s.optInt("episode_count", 0)
+        }
+        aired[id] = count to System.currentTimeMillis()
+        val o = JSONObject()
+        aired.forEach { (k, v) -> o.put(k.toString(), JSONObject().put("c", v.first).put("t", v.second)) }
+        EttyFlixApp.prefs.edit().putString(KEY, o.toString()).apply()
+        return count
+    }
+
+    suspend fun refresh() {
+        val entries = WatchProgress.entries.values.toList()
+        val done = ArrayList<Pair<MediaItem, Double>>()
+        val seen = HashSet<Int>()
+        entries.filter { it.mediaType == "movie" && it.finished }.sortedByDescending { it.updated }
+            .forEach { if (seen.add(it.tmdbID)) done.add(it.media to it.updated) }
+        val eps = HashMap<Int, HashSet<String>>()
+        val latest = HashMap<Int, WatchEntry>()
+        for (e in entries) {
+            if (e.mediaType != "tv" || !e.finished || (e.season ?: 0) <= 0) continue
+            eps.getOrPut(e.tmdbID) { HashSet() }.add("${e.season}-${e.episode}")
+            val cur = latest[e.tmdbID]
+            if (cur == null || cur.updated < e.updated) latest[e.tmdbID] = e
+        }
+        if (eps.isNotEmpty()) loading = true
+        for ((id, set) in eps) {
+            val total = airedCount(id) ?: continue
+            if (total > 0 && set.size >= total) latest[id]?.let { done.add(it.media to it.updated) }
+        }
+        loading = false
+        items = done.sortedByDescending { it.second }.map { it.first }
     }
 }
