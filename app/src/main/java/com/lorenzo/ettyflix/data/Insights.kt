@@ -136,13 +136,32 @@ object CalendarModel {
 
 enum class StatsPeriod(val title: String) { MONTH("Questo mese"), YEAR("Quest'anno"), ALL("Sempre") }
 
-data class StatCount(val label: String, val value: Double)
+data class StatCount(val label: String, val value: Double, val detail: String = "")
+
+/** ore precise in parole: "5 ore e 20 minuti", "45 minuti" */
+fun statExact(hours: Double): String {
+    val total = Math.round(hours * 60).toInt()
+    if (total <= 0) return "Niente"
+    val h = total / 60; val m = total % 60
+    val hs = if (h == 1) "1 ora" else "$h ore"
+    val ms = if (m == 1) "1 minuto" else "$m minuti"
+    return when { h == 0 -> ms; m == 0 -> hs; else -> "$hs e $ms" }
+}
+
+/** ore brevi: "5 h 20 min", "45 min" */
+fun statShort(hours: Double): String {
+    val total = Math.round(hours * 60).toInt()
+    if (total <= 0) return "0 min"
+    val h = total / 60; val m = total % 60
+    return when { h == 0 -> "$m min"; m == 0 -> "$h h"; else -> "$h h $m min" }
+}
 data class StatTop(val id: Int, val title: String, val posterPath: String?, val count: Int, val minutes: Double)
 
 data class StatsSummary(
     val minutes: Double = 0.0, val movies: Int = 0, val episodes: Int = 0, val series: Int = 0,
     val activeDays: Int = 0, val streak: Int = 0,
     val monthly: List<StatCount> = emptyList(), val genres: List<StatCount> = emptyList(),
+    val allGenres: List<StatCount> = emptyList(), val weekdays: List<StatCount> = emptyList(),
     val topSeries: List<StatTop> = emptyList(), val recentMovies: List<StatTop> = emptyList()
 ) {
     val hoursText: String get() = if (minutes >= 60) "${(minutes / 60).toInt()}" else "${minutes.toInt()}"
@@ -230,8 +249,11 @@ object StatsModel {
         val series = HashSet<Int>()
         val genreMin = HashMap<String, Double>()
         val seriesCount = HashMap<Int, Triple<WatchEntry, Int, Double>>()
+        val weekday = DoubleArray(7)
         for (e in inPeriod) {
             val m = minutes(e)
+            val dow = Calendar.getInstance().apply { timeInMillis = refToMillis(e.updated) }.get(Calendar.DAY_OF_WEEK)
+            weekday[(dow + 5) % 7] += m / 60   // 0 = lunedì
             total += m
             days.add(isoDayOf(refToMillis(e.updated)))
             if (e.mediaType == "movie") { if (e.finished) movies++ } else {
@@ -244,6 +266,7 @@ object StatsModel {
         }
         // ultimi 12 mesi
         val monthF = SimpleDateFormat("MMM", Locale.ITALIAN)
+        val monthFull = SimpleDateFormat("LLLL yyyy", Locale.ITALIAN)
         val monthly = (11 downTo 0).map { back ->
             val c0 = Calendar.getInstance().apply {
                 set(Calendar.DAY_OF_MONTH, 1); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
@@ -251,7 +274,8 @@ object StatsModel {
             }
             val c1 = (c0.clone() as Calendar).apply { add(Calendar.MONTH, 1) }
             val h = watched.filter { refToMillis(it.updated) in c0.timeInMillis until c1.timeInMillis }.sumOf { minutes(it) } / 60
-            StatCount(monthF.format(c0.time).replace(".", "").replaceFirstChar { it.uppercase() }, h)
+            StatCount(monthF.format(c0.time).replace(".", "").replaceFirstChar { it.uppercase() }, h,
+                monthFull.format(c0.time).replaceFirstChar { it.uppercase() })
         }
         // giorni di fila
         val allDays = watched.map { isoDayOf(refToMillis(it.updated)) }.toSet()
@@ -263,6 +287,10 @@ object StatsModel {
             minutes = total, movies = movies, episodes = episodes, series = series.size,
             activeDays = days.size, streak = streak, monthly = monthly,
             genres = genreMin.entries.sortedByDescending { it.value }.take(6).map { StatCount(it.key, it.value / 60) },
+            allGenres = genreMin.entries.sortedByDescending { it.value }.map { StatCount(it.key, it.value / 60) },
+            weekdays = listOf("Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom").zip(
+                listOf("Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica")
+            ).mapIndexed { i, (short, full) -> StatCount(short, weekday[i], full) },
             topSeries = seriesCount.values.sortedWith(compareByDescending<Triple<WatchEntry, Int, Double>> { it.third }.thenByDescending { it.second })
                 .take(8).map { StatTop(it.first.tmdbID, it.first.title, it.first.posterPath, it.second, it.third) },
             recentMovies = inPeriod.filter { it.mediaType == "movie" && it.finished }.sortedByDescending { it.updated }.take(12)
