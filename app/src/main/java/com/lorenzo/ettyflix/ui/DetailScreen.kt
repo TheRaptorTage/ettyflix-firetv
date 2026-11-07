@@ -148,7 +148,14 @@ fun DetailScreen(start: MediaItem) {
     }
 
     Box(Modifier.fillMaxSize().background(C.bg)) {
-        Backdrop(TMDBImage.url(item.backdropPath, "w1280"), Modifier.fillMaxWidth().height(470.dp), kenBurns = true)
+        // trailer ufficiale (iTunes) in sottofondo se c'è, altrimenti l'immagine che si muove piano
+        var trailer by remember(item.id) { mutableStateOf<String?>(null) }
+        LaunchedEffect(item.id) {
+            if (com.lorenzo.ettyflix.EttyFlixApp.prefs.getBoolean("bg_trailer", true))
+                trailer = com.lorenzo.ettyflix.data.AppleTrailers.url(item)
+        }
+        Backdrop(TMDBImage.url(item.backdropPath, "w1280"), Modifier.fillMaxWidth().height(470.dp), kenBurns = true,
+            video = trailer.takeIf { !Nav.top.fullScreen })
         LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp)) {
             item(key = "top") {
                 Column(Modifier.padding(start = C.pad, top = 80.dp, end = C.pad).widthIn(max = 600.dp)) {

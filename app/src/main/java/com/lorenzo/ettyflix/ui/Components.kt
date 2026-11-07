@@ -272,7 +272,7 @@ fun BadgesRow(b: QualityBadges, modifier: Modifier = Modifier) {
 
 /** Sfondo con sfumature verso il colore dell'app. */
 @Composable
-fun Backdrop(url: String?, modifier: Modifier = Modifier, alpha: Float = 1f, kenBurns: Boolean = false) {
+fun Backdrop(url: String?, modifier: Modifier = Modifier, alpha: Float = 1f, kenBurns: Boolean = false, video: String? = null) {
     // movimento lento dello sfondo (al posto del trailer, che sulla Fire Stick non si può incorporare)
     val zoom = if (kenBurns) {
         val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "kb")
@@ -282,6 +282,8 @@ fun Backdrop(url: String?, modifier: Modifier = Modifier, alpha: Float = 1f, ken
     Box(modifier.clipToBounds()) {
         Img(url, Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f) }
             .let { if (alpha < 1f) it.background(Color.Black) else it })
+        // trailer in sottofondo (sopra l'immagine, sotto le sfumature)
+        if (video != null) BackgroundVideo(video, Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0xD9000000), 0.45f to Color(0x66000000), 0.7f to Color.Transparent)))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 0.85f to C.bg.copy(alpha = 0.85f), 1f to C.bg)))
     }

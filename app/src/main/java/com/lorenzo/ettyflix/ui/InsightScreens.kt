@@ -278,3 +278,42 @@ fun LoadingBackdrop(url: String?) {
         Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Color.Transparent, Color(0xCC000000)), radius = 1400f)))
     }
 }
+
+/** Trailer muto in sottofondo (link diretto da iTunes), al massimo 1080p, in ciclo; compare in dissolvenza. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+fun BackgroundVideo(url: String, modifier: Modifier = Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var ready by androidx.compose.runtime.remember(url) { mutableStateOf(false) }
+    val alpha by androidx.compose.animation.core.animateFloatAsState(if (ready) 1f else 0f, tween(1400), label = "bv")
+    val player = androidx.compose.runtime.remember(url) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(ctx).build().apply {
+            volume = 0f
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            trackSelectionParameters = trackSelectionParameters.buildUpon().setMaxVideoSize(1920, 1080).build()
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(url))
+            addListener(object : androidx.media3.common.Player.Listener {
+                override fun onRenderedFirstFrame() { ready = true }
+            })
+            prepare()
+            playWhenReady = true
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(player) { onDispose { player.release() } }
+    // si vede qualche secondo dopo l'apertura della pagina
+    var show by androidx.compose.runtime.remember(url) { mutableStateOf(false) }
+    LaunchedEffect(url) { delay(2000); show = true }
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { c ->
+            androidx.media3.ui.PlayerView(c).apply {
+                useController = false
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                this.player = player
+                isFocusable = false
+                isFocusableInTouchMode = false
+            }
+        },
+        modifier = modifier.graphicsLayer { this.alpha = if (show) alpha else 0f }
+    )
+}
