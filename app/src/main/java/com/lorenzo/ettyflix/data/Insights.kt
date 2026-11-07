@@ -15,8 +15,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/** secondi dal 1/1/2001 (come sul Mac) → millisecondi */
-private fun refToMillis(ref: Double): Long = ((ref + 978_307_200.0) * 1000).toLong()
 private val isoDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 fun isoDayOf(ms: Long): String = synchronized(isoDay) { isoDay.format(Date(ms)) }
 fun todayIso(): String = isoDayOf(System.currentTimeMillis())

@@ -250,7 +250,7 @@ fun ScreensaverScreen() {
     val zoom by t.animateFloat(1f, 1.12f, infiniteRepeatable(tween(11_000, easing = LinearEasing), RepeatMode.Reverse), label = "z")
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (m != null) {
-            androidx.compose.animation.Crossfade(m, androidx.compose.animation.core.tween(1600), label = "c") { item ->
+            androidx.compose.animation.Crossfade(targetState = m, animationSpec = tween(1600), label = "c") { item ->
                 Img(TMDBImage.url(item.backdropPath, "original"), Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom })
             }
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xCC000000))))
