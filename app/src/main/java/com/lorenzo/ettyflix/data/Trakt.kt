@@ -12,6 +12,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -303,52 +308,71 @@ object Trakt {
         fun same() = gen == syncGen && Profiles.currentID == owner
         var complete = true
         try {
-            (json("/sync/last_activities", auth = true) as? JSONObject)?.let { la ->
-                la.str("all")?.let { syncedStamp = it }
-                val (o, pz) = stamps(la)
-                otherStamp = o; pausedStamp = pz
+            status = "Trakt: scarico…"
+            // tutte le liste di Trakt insieme (in parallelo)
+            val all = coroutineScope {
+                listOf("/sync/last_activities", "/sync/watched/movies", "/sync/watched/shows", "/sync/playback",
+                    "/sync/watchlist/movies", "/sync/watchlist/shows")
+                    .map { path -> async { json(path, auth = true) } }.awaitAll()
             }
-            val imported = mutableListOf<WatchEntry>()
-            val meta = HashMap<String, MediaDetail?>()
-            suspend fun detail(type: String, id: Int): MediaDetail? {
-                val k = "$type-$id"
-                if (meta.containsKey(k)) return meta[k]
-                val d = TMDB.detail(type, id)
-                meta[k] = d
-                return d
-            }
-            status = "Trakt: film visti…"
-            val moviesJ = json("/sync/watched/movies", auth = true) as? JSONArray
-            if (moviesJ == null) complete = false
+            val la = all[0] as? JSONObject
+            val lists = all.drop(1).map { it as? JSONArray }
+            val moviesJ = lists[0]; val showsJ = lists[1]; val playbackJ = lists[2]
+            val wlLists = listOf(Triple(lists[3], "movie", "movie"), Triple(lists[4], "tv", "show"))
+            if (lists.any { it == null }) complete = false
             if (!same()) return
+            // quello che c'è già qui non lo richiedo a TMDB
+            val local = HashMap<String, WatchEntry>()
+            for (e in WatchProgress.entries.values) {
+                val k = "${e.mediaType}-${e.tmdbID}"
+                val cur = local[k]
+                if (cur == null || cur.duration <= 60) local[k] = e
+            }
+            val localWL = HashMap<String, MediaItem>()
+            for (m in Store.watchlist) localWL["${m.mediaType}-${m.tmdbID}"] = m
+            val need = LinkedHashSet<Pair<String, Int>>()
+            moviesJ?.objects()?.forEach { m -> m.obj("movie").obj("ids").int("tmdb")?.let { if ("movie-$it" !in local) need += "movie" to it } }
+            showsJ?.objects()?.forEach { m -> m.obj("show").obj("ids").int("tmdb")?.let { if ("tv-$it" !in local) need += "tv" to it } }
+            playbackJ?.objects()?.forEach { p ->
+                if (p.str("type") == "movie") p.obj("movie").obj("ids").int("tmdb")?.let { need += "movie" to it }
+                else p.obj("show").obj("ids").int("tmdb")?.let { need += "tv" to it }
+            }
+            for ((l, type, key) in wlLists) l?.objects()?.forEach { it.obj(key).obj("ids").int("tmdb")?.let { id -> if ("$type-$id" !in localWL) need += type to id } }
+            val meta = HashMap<String, MediaDetail?>()
+            if (need.isNotEmpty()) status = "Trakt: ${need.size} titoli nuovi…"
+            val sem = Semaphore(8)
+            coroutineScope {
+                need.map { (t, id) -> async { sem.withPermit { "$t-$id" to TMDB.detail(t, id) } } }.awaitAll()
+            }.forEach { (k, d) -> meta[k] = d }
+            if (!same()) return
+            fun detail(type: String, id: Int): MediaDetail? = meta["$type-$id"]
+            val imported = mutableListOf<WatchEntry>()
             moviesJ?.objects()?.forEach { m ->
                 val id = m.obj("movie").obj("ids").int("tmdb") ?: return@forEach
-                val d = detail("movie", id)
-                val dur = ((d?.runtime ?: 100) * 60).toDouble()
-                imported += WatchEntry(WatchEntry.key(id, "movie", null, null), id, "movie", d?.item?.title ?: m.obj("movie").str("title") ?: "",
-                    d?.item?.posterPath, d?.item?.backdropPath, d?.logoPath, null, null, "", null, dur, dur, isoToRef(m.str("last_watched_at")), true)
+                val l = local["movie-$id"]; val d = detail("movie", id)
+                val dur = if ((l?.duration ?: 0.0) > 60) l!!.duration else ((d?.runtime ?: 100) * 60).toDouble()
+                imported += WatchEntry(WatchEntry.key(id, "movie", null, null), id, "movie",
+                    l?.title ?: d?.item?.title ?: m.obj("movie").str("title") ?: "",
+                    l?.posterPath ?: d?.item?.posterPath, l?.backdropPath ?: d?.item?.backdropPath, l?.logoPath ?: d?.logoPath,
+                    null, null, "", null, dur, dur, isoToRef(m.str("last_watched_at")), true)
             }
-            status = "Trakt: serie viste…"
-            val showsJ = json("/sync/watched/shows", auth = true) as? JSONArray
-            if (showsJ == null) complete = false
-            if (!same()) return
             showsJ?.objects()?.forEach { sh ->
                 val id = sh.obj("show").obj("ids").int("tmdb") ?: return@forEach
-                val d = detail("tv", id)
-                val dur = ((d?.runtime ?: 45) * 60).toDouble()
+                val l = local["tv-$id"]; val d = detail("tv", id)
+                val dur = if ((l?.duration ?: 0.0) > 60) l!!.duration else ((d?.runtime ?: 45) * 60).toDouble()
+                val title = l?.title ?: d?.item?.title ?: sh.obj("show").str("title") ?: ""
                 for (season in sh.arr("seasons")) {
                     val sn = season.int("number") ?: continue
                     for (ep in season.arr("episodes")) {
                         val en = ep.int("number") ?: continue
-                        imported += WatchEntry(WatchEntry.key(id, "tv", sn, en), id, "tv", d?.item?.title ?: sh.obj("show").str("title") ?: "",
-                            d?.item?.posterPath, d?.item?.backdropPath, d?.logoPath, sn, en, "", null, dur, dur, isoToRef(ep.str("last_watched_at")), true)
+                        val key = WatchEntry.key(id, "tv", sn, en)
+                        val mine = WatchProgress.entries[key]
+                        imported += WatchEntry(key, id, "tv", title,
+                            l?.posterPath ?: d?.item?.posterPath, l?.backdropPath ?: d?.item?.backdropPath, l?.logoPath ?: d?.logoPath,
+                            sn, en, mine?.episodeTitle ?: "", mine?.stillPath, dur, dur, isoToRef(ep.str("last_watched_at")), true)
                     }
                 }
             }
-            status = "Trakt: progressi…"
-            val playbackJ = json("/sync/playback", auth = true) as? JSONArray
-            if (playbackJ == null) complete = false
-            if (!same()) return
             playbackJ?.objects()?.forEach { p ->
                 val pct = (p.dbl("progress") ?: 0.0) / 100
                 val whenRef = isoToRef(p.str("paused_at"))
@@ -370,14 +394,11 @@ object Trakt {
                 }
             }
             if (!same()) return
-            status = "Trakt: watchlist…"
             val wl = mutableListOf<MediaItem>()
-            for ((path, type, key) in listOf(Triple("/sync/watchlist/movies", "movie", "movie"), Triple("/sync/watchlist/shows", "tv", "show"))) {
-                val listJ = json(path, auth = true) as? JSONArray
-                if (listJ == null) complete = false
+            for ((listJ, type, key) in wlLists) {
                 listJ?.objects()?.forEach { it ->
                     val id = it.obj(key).obj("ids").int("tmdb") ?: return@forEach
-                    detail(type, id)?.let { d -> wl += d.item }
+                    (localWL["$type-$id"] ?: detail(type, id)?.item)?.let { m -> wl += m }
                 }
             }
             if (!same()) return
@@ -394,6 +415,12 @@ object Trakt {
                     WatchProgress.importEntries(imported)
                     Store.mergeWatchlist(wl)
                 }
+            }
+            // segno l'ultima attività solo a lavoro finito
+            if (complete && la != null) {
+                la.str("all")?.let { syncedStamp = it }
+                val (o, pz) = stamps(la)
+                otherStamp = o; pausedStamp = pz
             }
             status = "Sincronizzato: ${imported.size} elementi, ${wl.size} in watchlist."
         } finally {

@@ -93,7 +93,7 @@ fun AppRoot(onExit: () -> Unit) {
         }
         // Ogni minuto controlla se su Trakt è cambiato qualcosa (es. hai visto qualcosa sul Mac)
         LaunchedEffect(Profiles.currentID) {
-            if (Trakt.isLoggedIn) runCatching { Trakt.syncAll() }
+            if (Trakt.isLoggedIn) runCatching { Trakt.quickSync() }   // completa solo se su Trakt è cambiato qualcosa
             while (true) {
                 delay(15_000)   // ogni 15 secondi (una richiesta leggera)
                 if (!Nav.top.fullScreen) runCatching { Trakt.quickSync() }
