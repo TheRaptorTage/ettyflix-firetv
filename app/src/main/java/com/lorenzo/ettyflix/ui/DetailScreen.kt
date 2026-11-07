@@ -148,7 +148,7 @@ fun DetailScreen(start: MediaItem) {
     }
 
     Box(Modifier.fillMaxSize().background(C.bg)) {
-        Backdrop(TMDBImage.url(item.backdropPath, "w1280"), Modifier.fillMaxWidth().height(470.dp))
+        Backdrop(TMDBImage.url(item.backdropPath, "w1280"), Modifier.fillMaxWidth().height(470.dp), kenBurns = true)
         LazyColumn(state = rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp)) {
             item(key = "top") {
                 Column(Modifier.padding(start = C.pad, top = 80.dp, end = C.pad).widthIn(max = 600.dp)) {

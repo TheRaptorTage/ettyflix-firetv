@@ -27,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -41,6 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -65,9 +69,20 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Stato del salvaschermo: ultimo tasto premuto e se è visibile. */
+object Idle {
+    var lastKey = android.os.SystemClock.uptimeMillis()
+    var saver by mutableStateOf(false)
+}
+
 @Composable
 fun AppRoot(onExit: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(C.bg)) {
+    Box(Modifier.fillMaxSize().background(C.bg)
+        // ogni tasto conta come attività; se il salvaschermo è aperto lo chiude e basta
+        .onPreviewKeyEvent {
+            Idle.lastKey = android.os.SystemClock.uptimeMillis()
+            if (Idle.saver) { if (it.type == KeyEventType.KeyUp) Idle.saver = false; true } else false
+        }) {
         if (!Profiles.chosen) {
             ProfileScreen()
             return@Box
@@ -87,6 +102,18 @@ fun AppRoot(onExit: () -> Unit) {
 
         val holder = rememberSaveableStateHolder()
         val top = Nav.top
+        // Salvaschermo interno: dopo qualche minuto senza tasti (non mentre guardi qualcosa)
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(10_000)
+                val p = com.lorenzo.ettyflix.EttyFlixApp.prefs
+                val on = p.getBoolean("screensaver_on", true)
+                val minutes = p.getInt("screensaver_minutes", 5)
+                if (on && !Idle.saver && !Nav.top.fullScreen && Nav.menu == null &&
+                    android.os.SystemClock.uptimeMillis() - Idle.lastKey > minutes * 60_000L &&
+                    (Store.watchlist.isNotEmpty() || WatchProgress.history.isNotEmpty())) Idle.saver = true
+            }
+        }
         BackHandler {
             when {
                 Nav.menu != null -> Nav.menu = null
@@ -121,6 +148,7 @@ fun AppRoot(onExit: () -> Unit) {
             }
         }
         Nav.menu?.let { MediaMenu(it) }
+        if (Idle.saver) ScreensaverScreen()
     }
 }
 
@@ -132,6 +160,8 @@ private fun ScreenContent(s: Screen) {
         Screen.Library -> LibraryScreen()
         Screen.Live -> LiveScreen()
         Screen.Settings -> SettingsScreen()
+        Screen.Calendar -> CalendarScreen()
+        Screen.Stats -> StatsScreen()
         is Screen.Detail -> DetailScreen(s.item)
         is Screen.TilePage -> TilePageScreen(s.tile)
         is Screen.Grid -> GridScreen(s.title, s.sources, s.items)
@@ -181,6 +211,8 @@ private fun Sidebar() {
         SideItem(Icons.Filled.Search, "Cerca", expanded, selected = Nav.tab == Screen.Search) { Nav.selectTab(Screen.Search) }
         SideItem(Icons.Filled.Home, "Home", expanded, selected = Nav.tab == Screen.Home) { Nav.selectTab(Screen.Home) }
         SideItem(Icons.Filled.VideoLibrary, "Libreria", expanded, selected = Nav.tab == Screen.Library) { Nav.selectTab(Screen.Library) }
+        SideItem(Icons.Filled.CalendarMonth, "Calendario", expanded, selected = Nav.tab == Screen.Calendar) { Nav.selectTab(Screen.Calendar) }
+        SideItem(Icons.Filled.BarChart, "Statistiche", expanded, selected = Nav.tab == Screen.Stats) { Nav.selectTab(Screen.Stats) }
         SideItem(Icons.Filled.LiveTv, "TV in diretta", expanded, selected = Nav.tab == Screen.Live) { Nav.selectTab(Screen.Live) }
         SideItem(Icons.Filled.Settings, "Impostazioni", expanded, selected = Nav.tab == Screen.Settings) { Nav.selectTab(Screen.Settings) }
         Spacer(Modifier.weight(1f))

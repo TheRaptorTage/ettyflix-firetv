@@ -18,6 +18,8 @@ sealed class Screen {
     data object Library : Screen()
     data object Live : Screen()
     data object Settings : Screen()
+    data object Calendar : Screen()
+    data object Stats : Screen()
 
     data class Detail(val item: MediaItem) : Screen()
     data class TilePage(val tile: Tile) : Screen()

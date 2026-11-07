@@ -512,8 +512,8 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         if (!started || buffering) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (!started) {
-                    Img(TMDBImage.url(req.stillPath ?: req.media.backdropPath, "w1280"), Modifier.fillMaxSize())
-                    Box(Modifier.fillMaxSize().background(Color(0xB3000000)))
+                    // sfondo del titolo scuro che si muove piano
+                    com.lorenzo.ettyflix.ui.LoadingBackdrop(TMDBImage.url(req.media.backdropPath ?: req.stillPath, "w1280"))
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = Color.White)
