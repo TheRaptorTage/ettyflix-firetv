@@ -48,7 +48,8 @@ object CalendarModel {
     suspend fun load(force: Boolean = false) {
         val ids = LinkedHashSet<Int>()
         Store.watchlist.filter { it.mediaType == "tv" }.forEach { ids.add(it.tmdbID) }
-        WatchProgress.history.filter { it.mediaType == "tv" }.forEach { ids.add(it.tmdbID) }
+        // serie di cui hai visto davvero qualcosa: almeno un episodio al 75% (non 2 minuti di prova)
+        WatchProgress.entries.values.filter { it.mediaType == "tv" && (it.finished || it.fraction >= 0.75) }.forEach { ids.add(it.tmdbID) }
         val key = Profiles.currentID + ":" + ids.joinToString(",")
         if (!force && key == loadedFor && System.currentTimeMillis() - loadedAt < 3_600_000) return
         loading = true
