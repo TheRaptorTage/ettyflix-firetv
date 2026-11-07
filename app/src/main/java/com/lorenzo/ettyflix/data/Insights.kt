@@ -204,10 +204,14 @@ object StatsModel {
         }
     }
 
+    /** Per i titoli finiti uso la durata di TMDB: uguale su tutti i dispositivi dopo la sincronizzazione con Trakt. */
     private fun minutes(e: WatchEntry): Double {
-        if (e.duration > 60) return (if (e.finished) e.duration else minOf(e.position, e.duration)) / 60
-        if (!e.finished) return e.position / 60
-        return (meta[idOf(e)]?.runtime ?: if (e.mediaType == "tv") 45 else 110).toDouble()
+        if (e.finished) {
+            meta[idOf(e)]?.runtime?.let { return it.toDouble() }
+            if (e.duration > 60) return e.duration / 60
+            return if (e.mediaType == "tv") 45.0 else 110.0
+        }
+        return (if (e.duration > 60) minOf(e.position, e.duration) else e.position) / 60
     }
 
     fun summary(period: StatsPeriod): StatsSummary {
