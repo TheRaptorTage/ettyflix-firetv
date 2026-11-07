@@ -210,10 +210,75 @@ object Trakt {
         set(v) { EttyFlixApp.prefs.edit().putString(Profiles.key("trakt_synced_stamp"), v).apply() }
 
     /** Controllo leggero: se su Trakt è cambiato qualcosa rifà la sincronizzazione completa. */
+    private var pausedStamp: String
+        get() = EttyFlixApp.prefs.getString(Profiles.key("trakt_paused_stamp"), "") ?: ""
+        set(v) { EttyFlixApp.prefs.edit().putString(Profiles.key("trakt_paused_stamp"), v).apply() }
+    private var otherStamp: String
+        get() = EttyFlixApp.prefs.getString(Profiles.key("trakt_other_stamp"), "") ?: ""
+        set(v) { EttyFlixApp.prefs.edit().putString(Profiles.key("trakt_other_stamp"), v).apply() }
+
+    /** "Visti / watchlist" e "in pausa" da last_activities. */
+    private fun stamps(j: JSONObject): Pair<String, String> {
+        fun g(a: String, b: String) = j.optJSONObject(a)?.optString(b, "") ?: ""
+        val paused = g("movies", "paused_at") + "|" + g("episodes", "paused_at")
+        val other = listOf(g("movies", "watched_at"), g("episodes", "watched_at"), g("movies", "watchlisted_at"),
+            g("shows", "watchlisted_at"), g("movies", "collected_at"), g("episodes", "collected_at")).joinToString("|")
+        return other to paused
+    }
+
+    /** Controllo leggero: se altrove ti sei solo fermato a metà scarica subito le posizioni, altrimenti tutto. */
     suspend fun quickSync() {
         if (!isLoggedIn || busy) return
-        val stamp = (json("/sync/last_activities", auth = true) as? JSONObject)?.str("all") ?: return
-        if (stamp != syncedStamp) syncAll()
+        val la = json("/sync/last_activities", auth = true) as? JSONObject ?: return
+        val stamp = la.str("all") ?: return
+        if (stamp == syncedStamp) return
+        val (other, paused) = stamps(la)
+        if (other == otherStamp) {
+            if (paused != pausedStamp) { playbackSync(); pausedStamp = paused }
+            syncedStamp = stamp
+        } else syncAll()
+    }
+
+    /** Solo le posizioni a metà: riapri l'app su un altro dispositivo e riprendi dal punto esatto. */
+    suspend fun playbackSync() {
+        if (!isLoggedIn || busy) return
+        val gen = syncGen
+        val owner = Profiles.currentID
+        val list = json("/sync/playback", auth = true) as? JSONArray ?: return
+        val out = mutableListOf<WatchEntry>()
+        list.objects().forEach { p ->
+            val pct = (p.dbl("progress") ?: 0.0) / 100
+            if (pct <= 0) return@forEach
+            val whenRef = isoToRef(p.str("paused_at"))
+            val movie = p.str("type") == "movie"
+            val id = (if (movie) p.obj("movie") else p.obj("show")).obj("ids").int("tmdb") ?: return@forEach
+            val sn = if (movie) null else (p.obj("episode").int("season") ?: return@forEach)
+            val en = if (movie) null else (p.obj("episode").int("number") ?: return@forEach)
+            val type = if (movie) "movie" else "tv"
+            val key = WatchEntry.key(id, type, sn, en)
+            val local = WatchProgress.entries[key]
+            if (local != null && local.updated >= whenRef - 1) return@forEach
+            var dur = if ((local?.duration ?: 0.0) > 60) local!!.duration else 0.0
+            var title = local?.title ?: ""
+            var poster = local?.posterPath; var backdrop = local?.backdropPath; var logo = local?.logoPath; var still = local?.stillPath
+            if (local == null || dur == 0.0) {
+                TMDB.detail(type, id)?.let { d ->
+                    if (title.isEmpty()) title = d.item.title
+                    poster = poster ?: d.item.posterPath; backdrop = backdrop ?: d.item.backdropPath; logo = logo ?: d.logoPath
+                    if (movie) dur = ((d.runtime ?: 100) * 60).toDouble()
+                }
+                if (!movie && sn != null && en != null) {
+                    val ep = TMDB.episodes(id, sn).firstOrNull { it.number == en }
+                    still = still ?: ep?.stillPath
+                    if (dur == 0.0) dur = ((ep?.runtime ?: 45) * 60).toDouble()
+                }
+                if (title.isEmpty()) title = (if (movie) p.obj("movie") else p.obj("show")).str("title") ?: ""
+            }
+            out += WatchEntry(key, id, type, title, poster, backdrop, logo, sn, en,
+                local?.episodeTitle ?: (p.obj("episode").str("title") ?: ""), still, dur * pct, dur, whenRef, false)
+        }
+        if (gen != syncGen || Profiles.currentID != owner || out.isEmpty()) return
+        withContext(Dispatchers.Main) { WatchProgress.importEntries(out) }
     }
 
     suspend fun syncAll() {
@@ -224,7 +289,11 @@ object Trakt {
         fun same() = gen == syncGen && Profiles.currentID == owner
         var complete = true
         try {
-            (json("/sync/last_activities", auth = true) as? JSONObject)?.str("all")?.let { syncedStamp = it }
+            (json("/sync/last_activities", auth = true) as? JSONObject)?.let { la ->
+                la.str("all")?.let { syncedStamp = it }
+                val (o, pz) = stamps(la)
+                otherStamp = o; pausedStamp = pz
+            }
             val imported = mutableListOf<WatchEntry>()
             val meta = HashMap<String, MediaDetail?>()
             suspend fun detail(type: String, id: Int): MediaDetail? {
@@ -342,10 +411,11 @@ object Trakt {
         scope.launch { ensureFreshToken(); send(if (watched) "/sync/history" else "/sync/history/remove", "POST", body, auth = true) }
     }
 
-    fun pushProgress(e: WatchEntry) {
+    fun pushProgress(e: WatchEntry, urgent: Boolean = false) {
         if (!isLoggedIn || e.finished || e.duration <= 0) return
         val last = lastScrobble[e.id] ?: 0
-        if (System.currentTimeMillis() - last < 30_000) return
+        // in pausa / alla chiusura parte sempre subito; durante la visione al massimo ogni 30 secondi
+        if (!urgent && System.currentTimeMillis() - last < 30_000) return
         lastScrobble[e.id] = System.currentTimeMillis()
         val body = JSONObject().put("progress", e.fraction * 100)
         if (e.mediaType == "movie") body.put("movie", ids(e.tmdbID))

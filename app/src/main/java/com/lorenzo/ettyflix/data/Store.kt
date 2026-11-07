@@ -290,7 +290,7 @@ object WatchProgress {
             return best.values.sortedByDescending { it.updated }
         }
 
-    fun update(req: PlayRequest, position: Double, duration: Double) {
+    fun update(req: PlayRequest, position: Double, duration: Double, urgent: Boolean = true) {
         val m = req.media
         if (m.tmdbID <= 0 || duration <= 60 || position <= 5) return
         val key = WatchEntry.key(m.tmdbID, m.mediaType, req.season, req.episode)
@@ -303,7 +303,7 @@ object WatchProgress {
         hiddenFromContinue = hiddenFromContinue - m.tmdbID
         save()
         if (finished && !wasFinished) Trakt.pushWatched(listOf(e), true)
-        if (!finished) Trakt.pushProgress(e)
+        if (!finished) Trakt.pushProgress(e, urgent)
     }
 
     /** Progressi uguali a quelli dell'account Trakt del profilo (una volta sola). Restano quelli delle ultime 2 ore. */

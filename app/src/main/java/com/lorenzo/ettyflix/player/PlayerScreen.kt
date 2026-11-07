@@ -229,9 +229,9 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         return duration > 1 && duration < 300 && (expected >= 15 * 60 || (expected == 0.0 && duration < 90))
     }
 
-    fun save() {
+    fun save(periodic: Boolean = false) {
         if (!started || looksExpired()) return
-        WatchProgress.update(req, position, duration)
+        WatchProgress.update(req, position, duration, urgent = !periodic)
     }
 
     fun tryNext(reason: String) {
@@ -343,7 +343,7 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
                 showControls = false; buttons = false
             }
             tick++
-            if (tick % 20 == 0 && playing) save()
+            if (tick % 20 == 0 && playing) save(periodic = true)
         }
     }
 

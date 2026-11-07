@@ -95,7 +95,7 @@ fun AppRoot(onExit: () -> Unit) {
         LaunchedEffect(Profiles.currentID) {
             if (Trakt.isLoggedIn) runCatching { Trakt.syncAll() }
             while (true) {
-                delay(60_000)
+                delay(15_000)   // ogni 15 secondi (una richiesta leggera)
                 if (!Nav.top.fullScreen) runCatching { Trakt.quickSync() }
             }
         }

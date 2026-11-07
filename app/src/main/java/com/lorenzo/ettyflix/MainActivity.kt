@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
             Nav.selectTab(Screen.Home)
         }
         leftAt = 0
-        if (Profiles.chosen && Trakt.isLoggedIn) lifecycleScope.launch { runCatching { Trakt.syncAll() } }
+        // riaprendo l'app: subito le posizioni aggiornate dagli altri dispositivi
+        if (Profiles.chosen && Trakt.isLoggedIn) lifecycleScope.launch { runCatching { Trakt.quickSync() } }
     }
 }
