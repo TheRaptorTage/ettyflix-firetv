@@ -31,7 +31,7 @@ object StartupSound {
     suspend fun prepare(style: StartupSoundStyle, border: Boolean): AudioTrack? = withContext(Dispatchers.Default) {
         if (style == StartupSoundStyle.NESSUNO) return@withContext null
         runCatching {
-            val file = File(EttyFlixApp.ctx.cacheDir, "ettyflix_sound_v3_${style.id}_${if (border) "b" else "r"}.pcm")
+            val file = File(EttyFlixApp.ctx.cacheDir, "ettyflix_sound_v4_${style.id}_${if (border) "b" else "r"}.pcm")
             val data: FloatArray = if (file.exists() && file.length() > 0) {
                 val bb = ByteBuffer.wrap(file.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
                 FloatArray(bb.remaining() / 4) { bb.getFloat() }
@@ -235,7 +235,7 @@ object StartupSound {
         val R = reverb(b.R, 0.55f, 1.07)
         var peak = 0f
         for (i in L.indices) peak = max(peak, max(abs(L[i]), abs(R[i])))
-        val gain = if (peak > 0.85f) 0.85f / peak else 1f
+        val gain = minOf(1.15f, 0.97f / maxOf(peak, 0.0001f))   // circa il 15% più forte
         val fadeStart = (3.7 * SR).toInt()
         for (i in L.indices) {
             var g = gain
