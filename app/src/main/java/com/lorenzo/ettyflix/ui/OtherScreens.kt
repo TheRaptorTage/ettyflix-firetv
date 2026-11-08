@@ -302,7 +302,7 @@ fun LibraryScreen() {
     }
     PosterGrid("Libreria", items) {
         Row(Modifier.padding(start = C.pad, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("Watchlist", tab == 0) { tab = 0 }
+            Chip("Da guardare", tab == 0) { tab = 0 }
             Chip("Visti di recente", tab == 1) { tab = 1 }
             Chip("Completati", tab == 2) { tab = 2 }
         }

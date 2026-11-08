@@ -33,13 +33,22 @@ object TMDB {
 
     // MARK: Sorgenti
 
+    /** Niente animazione nelle liste, tranne quando la chiedi tu (genere Animazione o riga "Anime e animazione"). */
+    private fun withoutAnimation(list: List<MediaItem>, q: Map<String, String>, name: String): List<MediaItem> {
+        val wanted = name.lowercase().contains("anim") ||
+            (q["with_genres"] ?: "").split(',', '|').contains("16") ||
+            (q["with_keywords"] ?: "").contains("210024") ||
+            (q["with_original_language"] == "ja" && (q["with_genres"] ?: "").isEmpty())
+        return if (wanted) list else list.filter { 16 !in it.genreIDs }
+    }
+
     suspend fun fetchPage(src: SourceDef, page: Int): List<MediaItem> = when (src.kind) {
         "traktList" -> Trakt.listItems(src.listID ?: 0, src.path, page)
         "discover" -> {
             val q = src.params.toMutableMap()
             q["page"] = page.toString()
             if (!q.containsKey("include_adult")) q["include_adult"] = "false"
-            parse(get("discover/${src.mediaType}", q)?.arr("results") ?: emptyList(), src.mediaType)
+            withoutAnimation(parse(get("discover/${src.mediaType}", q)?.arr("results") ?: emptyList(), src.mediaType), q, src.name)
         }
         "tmdbList" -> {
             val id = src.listID
@@ -48,7 +57,7 @@ object TMDB {
         else -> {
             val q = src.params.toMutableMap()
             q["page"] = page.toString()
-            parse(get(src.path, q)?.arr("results") ?: emptyList(), src.mediaType.ifEmpty { null })
+            withoutAnimation(parse(get(src.path, q)?.arr("results") ?: emptyList(), src.mediaType.ifEmpty { null }), q, src.name)
         }
     }
 
