@@ -66,9 +66,9 @@ object Look {
     /** cambia ogni volta che si vuole rivedere l'animazione */
     var replay by mutableIntStateOf(0)
 
-    fun setTheme(t: AuroraTheme) { theme = t; prefs.edit().putString("aurora_theme", t.id).apply(); replay++ }
-    fun setShine(s: SplashShine) { shine = s; prefs.edit().putString("splash_shine", s.id).apply(); replay++ }
-    fun setSound(s: StartupSoundStyle) { sound = s; prefs.edit().putString("startup_sound_v4", s.id).apply(); replay++ }
+    fun chooseTheme(t: AuroraTheme) { theme = t; prefs.edit().putString("aurora_theme", t.id).apply(); replay++ }
+    fun chooseShine(s: SplashShine) { shine = s; prefs.edit().putString("splash_shine", s.id).apply(); replay++ }
+    fun chooseSound(s: StartupSoundStyle) { sound = s; prefs.edit().putString("startup_sound_v4", s.id).apply(); replay++ }
 }
 
 /** Aurora: colori che si muovono lentamente (sfondo dell'apertura e della scelta del profilo). */

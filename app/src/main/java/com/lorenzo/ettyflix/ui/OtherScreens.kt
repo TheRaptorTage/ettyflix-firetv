@@ -403,7 +403,7 @@ fun SettingsScreen() {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     AuroraTheme.entries.forEach { t ->
-                        PillButton((if (Look.theme == t) "✓ " else "") + t.title, primary = Look.theme == t) { Look.setTheme(t) }
+                        PillButton((if (Look.theme == t) "✓ " else "") + t.title, primary = Look.theme == t) { Look.chooseTheme(t) }
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -411,7 +411,7 @@ fun SettingsScreen() {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SplashShine.entries.forEach { sh ->
-                        PillButton((if (Look.shine == sh) "✓ " else "") + sh.title, primary = Look.shine == sh) { Look.setShine(sh) }
+                        PillButton((if (Look.shine == sh) "✓ " else "") + sh.title, primary = Look.shine == sh) { Look.chooseShine(sh) }
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -419,7 +419,7 @@ fun SettingsScreen() {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StartupSoundStyle.entries.forEach { so ->
-                        PillButton((if (Look.sound == so) "✓ " else "") + so.title, primary = Look.sound == so) { Look.setSound(so) }
+                        PillButton((if (Look.sound == so) "✓ " else "") + so.title, primary = Look.sound == so) { Look.chooseSound(so) }
                     }
                 }
                 Spacer(Modifier.height(14.dp))
