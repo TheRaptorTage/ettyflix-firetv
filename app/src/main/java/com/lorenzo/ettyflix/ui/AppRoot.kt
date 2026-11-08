@@ -235,8 +235,9 @@ private fun SideItem(icon: ImageVector?, label: String, expanded: Boolean, selec
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (avatar != null) {
-            val (a, b) = Profiles.palette[avatar.coerceIn(0, Profiles.palette.lastIndex)]
-            Box(Modifier.size(26.dp).background(Brush.linearGradient(listOf(Color(a), Color(b))), CircleShape)
+            // stesso colore della scelta del profilo (segue lo sfondo scelto nelle Impostazioni)
+            val t = Look.theme.avatarTint(Profiles.current)
+            Box(Modifier.size(26.dp).background(Brush.linearGradient(listOf(t, t.copy(alpha = 0.7f))), CircleShape)
                 .border(1.dp, Color(0x55FFFFFF), CircleShape), contentAlignment = Alignment.Center) {
                 Text(initial, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
