@@ -234,6 +234,13 @@ object Trakt {
     /** Controllo leggero: se altrove ti sei solo fermato a metà scarica subito le posizioni, altrimenti tutto. */
     suspend fun quickSync() {
         if (!isLoggedIn || busy) return
+        // una volta per profilo dopo questo aggiornamento: sincronizzazione completa
+        val fullKey = Profiles.key("trakt_full_sync_v2")
+        if (!EttyFlixApp.prefs.getBoolean(fullKey, false)) {
+            syncAll()
+            EttyFlixApp.prefs.edit().putBoolean(fullKey, true).apply()
+            return
+        }
         val la = json("/sync/last_activities", auth = true) as? JSONObject ?: return
         val stamp = la.str("all") ?: return
         if (stamp == syncedStamp) return
