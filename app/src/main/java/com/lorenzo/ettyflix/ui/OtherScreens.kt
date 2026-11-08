@@ -398,6 +398,35 @@ fun SettingsScreen() {
     LazyColumn(contentPadding = PaddingValues(horizontal = C.pad, vertical = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { Text("Impostazioni", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
         item {
+            Section("Aspetto (apertura e profili)") {
+                Text("Colori dello sfondo", color = C.dim, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AuroraTheme.entries.forEach { t ->
+                        PillButton((if (Look.theme == t) "✓ " else "") + t.title, primary = Look.theme == t) { Look.setTheme(t) }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Text("Effetto di luce dell'apertura", color = C.dim, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SplashShine.entries.forEach { sh ->
+                        PillButton((if (Look.shine == sh) "✓ " else "") + sh.title, primary = Look.shine == sh) { Look.setShine(sh) }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Text("Suono d'avvio", color = C.dim, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StartupSoundStyle.entries.forEach { so ->
+                        PillButton((if (Look.sound == so) "✓ " else "") + so.title, primary = Look.sound == so) { Look.setSound(so) }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                PillButton("Guarda di nuovo l'animazione") { Look.replay++ }
+            }
+        }
+        item {
             Section("Ricevi configurazione dal Mac") {
                 Text("Sul Mac apri EttyFlix › Impostazioni › Condividi configurazione e scrivi questo codice. Mac e Fire TV devono essere sulla stessa rete.",
                     color = C.dim, fontSize = 14.sp)

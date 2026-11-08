@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
@@ -43,6 +44,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,10 +80,13 @@ fun ProfileScreen() {
     val first = remember { FocusRequester() }
     var adding by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
-        PetrolBackground()
-        Clock(Modifier.align(Alignment.TopEnd).padding(36.dp), size = 16)
+        EttyProfileBackground()   // stesso sfondo dell'animazione d'apertura (colore scelto nelle Impostazioni)
+        ProfileClock(Modifier.align(Alignment.TopEnd).padding(36.dp))
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Chi vuole guardare?", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text("Chi vuole guardare?", style = TextStyle(
+                brush = Brush.verticalGradient(listOf(Color.White, Color.White.copy(alpha = 0.82f))),
+                shadow = Shadow(Color(0x73000000), Offset(0f, 3f), 8f)),
+                fontSize = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(40.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(36.dp)) {
                 Profiles.list.forEachIndexed { i, p ->
@@ -100,22 +106,44 @@ private fun ProfileAvatar(p: Profile, modifier: Modifier, onClick: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
     val scale by animateFloatAsState(if (focused) 1.12f else 1f, tween(220), label = "s")
-    val (a, b) = Profiles.palette[p.color.coerceIn(0, Profiles.palette.lastIndex)]
+    val tint = Look.theme.avatarTint(p)   // colore in armonia con lo sfondo scelto
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier
         .clickable(interactionSource = src, indication = null, onClick = onClick)) {
         Box(
             Modifier.scale(scale).size(118.dp).clip(CircleShape)
-                .background(Brush.linearGradient(listOf(Color(a).copy(alpha = 0.85f), Color(b).copy(alpha = 0.9f))))
-                .border(if (focused) 3.dp else 1.dp, if (focused) Color.White else Color(0x40FFFFFF), CircleShape),
+                // cerchio "di vetro" colorato
+                .background(Brush.linearGradient(listOf(tint.copy(alpha = if (focused) 0.75f else 0.55f), tint.copy(alpha = if (focused) 0.5f else 0.32f))))
+                .border(if (focused) 3.dp else 1.dp,
+                    if (focused) Brush.linearGradient(listOf(Color.White, Color.White)) else
+                        Brush.linearGradient(listOf(Color(0x99FFFFFF), Color(0x1AFFFFFF), Color(0x66FFFFFF))), CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Box(Modifier.size(118.dp).background(Brush.radialGradient(listOf(Color(0x33FFFFFF), Color.Transparent),
-                center = Offset(110f, 80f), radius = 160f)))
-            Text(p.name.take(1).uppercase(), color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Light)
+            Box(Modifier.size(118.dp).background(Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color.Transparent, Color(0x14FFFFFF)))))
+            Text(p.name.take(1).uppercase(), color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Medium)
         }
         Spacer(Modifier.height(16.dp))
-        Text(p.name, color = if (focused) Color.White else C.dim, fontSize = 18.sp,
-            fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal)
+        // nome dentro una pillola di vetro (il testo resta normale)
+        Text(p.name, color = Color.White, fontSize = 18.sp,
+            fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium,
+            modifier = Modifier.clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = if (focused) 0.28f else 0.14f))
+                .border(1.dp, Brush.verticalGradient(listOf(Color(0x80FFFFFF), Color(0x1AFFFFFF))), RoundedCornerShape(50))
+                .padding(horizontal = 14.dp, vertical = 5.dp))
+    }
+}
+
+/** Ora e data in alto a destra: lettere chiare con un leggero riflesso e ombra (come sulle altre app). */
+@Composable
+private fun ProfileClock(modifier: Modifier) {
+    var now by remember { mutableStateOf(java.util.Date()) }
+    LaunchedEffect(Unit) { while (true) { now = java.util.Date(); kotlinx.coroutines.delay(15_000) } }
+    val glassText = TextStyle(brush = Brush.verticalGradient(listOf(Color.White, Color.White.copy(alpha = 0.82f))),
+        shadow = Shadow(Color(0x73000000), Offset(0f, 3f), 8f))
+    Column(modifier, horizontalAlignment = Alignment.End) {
+        Text(java.text.SimpleDateFormat("HH:mm", java.util.Locale.ITALIAN).format(now), style = glassText,
+            fontSize = 54.sp, fontWeight = FontWeight.Medium)
+        Text(java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.ITALIAN).format(now).replaceFirstChar { it.uppercase() },
+            style = glassText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
