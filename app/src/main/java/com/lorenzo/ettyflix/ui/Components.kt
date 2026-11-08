@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -227,7 +228,12 @@ fun Img(url: String?, modifier: Modifier = Modifier, scale: ContentScale = Conte
 /** Locandina verticale. */
 @Composable
 fun PosterCard(item: MediaItem, width: Dp = 130.dp, showTitle: Boolean = false, onFocus: (() -> Unit)? = null) {
-    val watched = com.lorenzo.ettyflix.data.WatchProgress.isWatched(item.tmdbID, item.mediaType)
+    // spunta: film visto, oppure serie con tutti gli episodi usciti visti
+    val watched = if (item.mediaType == "movie") com.lorenzo.ettyflix.data.WatchProgress.isWatched(item.tmdbID, "movie")
+        else com.lorenzo.ettyflix.data.CompletedModel.items.any { it.id == item.id }
+    // voto IMDb (se IMDb non lo ha, quello di TMDB)
+    var rating by remember(item.id) { mutableStateOf(com.lorenzo.ettyflix.data.Ratings.cached(item) ?: item.rating) }
+    LaunchedEffect(item.id) { runCatching { com.lorenzo.ettyflix.data.Ratings.imdbRating(item) }.getOrNull()?.let { rating = it } }
     Column(Modifier.width(width)) {
         FocusBox(
             onClick = { Nav.push(Screen.Detail(item)) },
@@ -239,6 +245,10 @@ fun PosterCard(item: MediaItem, width: Dp = 130.dp, showTitle: Boolean = false, 
                 Img(TMDBImage.url(item.posterPath, "w342"), Modifier.fillMaxSize())
                 if (item.posterPath == null) Text(item.title, color = C.dim, fontSize = 13.sp, modifier = Modifier.align(Alignment.Center).padding(8.dp))
                 if (watched) CheckBadge(Modifier.align(Alignment.TopEnd).padding(6.dp))
+                if (rating > 0) Text("★ " + String.format(java.util.Locale.US, "%.1f", rating), color = Color.White, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).clip(RoundedCornerShape(50))
+                        .background(Color(0x99000000)).padding(horizontal = 7.dp, vertical = 2.dp))
             }
         }
         if (showTitle) Text(item.title, color = C.dim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

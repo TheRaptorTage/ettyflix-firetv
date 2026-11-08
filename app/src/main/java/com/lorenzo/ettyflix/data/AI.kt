@@ -262,9 +262,25 @@ object AI {
 
 object Ratings {
     private val imdb = HashMap<String, Double?>()
+    /** voti IMDb già letti (restano tra un avvio e l'altro): per le copertine */
+    private val saved: MutableMap<String, Double> by lazy {
+        val out = HashMap<String, Double>()
+        runCatching {
+            val o = JSONObject(EttyFlixApp.prefs.getString("imdb_ratings_v1", "{}") ?: "{}")
+            for (k in o.keys()) out[k] = o.getDouble(k)
+        }
+        out
+    }
+    fun cached(m: MediaItem): Double? = saved[m.id] ?: imdb[m.id]
+    private fun remember(id: String, v: Double) {
+        saved[id] = v
+        val o = JSONObject(); saved.forEach { (k, x) -> o.put(k, x) }
+        EttyFlixApp.prefs.edit().putString("imdb_ratings_v1", o.toString()).apply()
+    }
     private val seasonsCinemeta = HashMap<String, Map<Int, Double>>()
 
     suspend fun imdbRating(m: MediaItem): Double? {
+        saved[m.id]?.let { return it }
         if (imdb.containsKey(m.id)) return imdb[m.id]
         val id = TMDB.imdbID(m.mediaType, m.tmdbID)
         if (id == null) { imdb[m.id] = null; return null }
@@ -282,6 +298,7 @@ object Ratings {
         if (sums.isNotEmpty()) seasonsCinemeta[m.id] = sums.mapValues { it.value.first / it.value.second }
         val v = meta.dbl("imdbRating")?.takeIf { it > 0 }
         imdb[m.id] = v
+        if (v != null) remember(m.id, v)
         return v
     }
 
