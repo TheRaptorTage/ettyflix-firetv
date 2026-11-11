@@ -101,7 +101,10 @@ fun HomeScreen() {
     var topMovies by remember { mutableStateOf(listOf<MediaItem>()) }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(Store.reloadToken, Store.hasKey) {
+    // ogni 3 ore il banner in alto cambia titoli
+    var heroSlot by remember { mutableStateOf(TMDB.heroSlot()) }
+    LaunchedEffect(Unit) { while (true) { delay(300_000); TMDB.heroSlot().let { if (it != heroSlot) heroSlot = it } } }
+    LaunchedEffect(Store.reloadToken, Store.hasKey, heroSlot) {
         if (!Store.hasKey) return@LaunchedEffect
         coroutineScope {
             val h = async { TMDB.heroWithNewSeasons() }

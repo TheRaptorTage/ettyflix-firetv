@@ -122,24 +122,46 @@ object TMDB {
         results.sortedByDescending { it.third }.map { it.first }
     }
 
-    suspend fun heroItems(): List<MediaItem> {
-        val out = mutableListOf<MediaItem>()
-        for (p in 1..2) out += parse(get("tv/on_the_air", mapOf("page" to "$p"))?.arr("results") ?: emptyList(), "tv")
+    /** serie del banner davvero in onda (per l'etichetta) */
+    private val onAirIDs = HashSet<Int>()
+
+    /** Fascia di 3 ore: quando cambia, il banner della Home pesca titoli diversi. */
+    fun heroSlot(): Long = System.currentTimeMillis() / (3 * 3600 * 1000L)
+
+    /** Serie belle e attuali da cui pescare a caso (in onda, di tendenza, popolari), escluse quelle che stai guardando. */
+    suspend fun heroPool(): List<MediaItem> {
         val bad = setOf(16, 10762, 10763, 10764, 10766, 10767)
-        return out.filter { it.backdropPath != null && it.overview.isNotEmpty() && it.rating >= 6.5 && it.genreIDs.none { g -> g in bad } }
-            .sortedByDescending { it.popularity }.take(5)
+        val known = WatchProgress.entries.values.map { it.tmdbID }.toSet()
+        val out = mutableListOf<MediaItem>()
+        val sources = listOf("tv/on_the_air" to mapOf("page" to "1"), "tv/on_the_air" to mapOf("page" to "2"),
+            "tv/on_the_air" to mapOf("page" to "3"), "trending/tv/day" to emptyMap<String, String>(), "trending/tv/week" to emptyMap<String, String>(),
+            "tv/popular" to emptyMap<String, String>())
+        for ((path, q) in sources) {
+            val items = parse(get(path, q)?.arr("results") ?: emptyList(), "tv")
+            if (path == "tv/on_the_air") onAirIDs += items.map { it.tmdbID }
+            out += items
+        }
+        val ids = HashSet<Int>()
+        return out.filter {
+            it.backdropPath != null && it.overview.isNotEmpty() && it.rating >= 6.8 && it.genreIDs.none { g -> g in bad } &&
+                it.tmdbID !in known && ids.add(it.tmdbID)
+        }
     }
 
+    suspend fun heroItems(): List<MediaItem> = heroPool().take(5)
+
+    /** Banner: al massimo 3 nuove stagioni delle tue serie + serie a caso; cambia ogni 3 ore. */
     suspend fun heroWithNewSeasons(): List<MediaItem> = coroutineScope {
+        val rnd = java.util.Random(heroSlot() * 2654435761L + 97)
         val mine = async { newSeasonItems() }
-        val air = async { heroItems() }
-        val out = mine.await().toMutableList()
-        val seen = out.map { it.tmdbID }.toSet()
-        out += air.await().filter { it.tmdbID !in seen }
-        out.take(10)
+        val pool = async { heroPool() }
+        val fresh = mine.await().shuffled(rnd).take(3)
+        val seen = fresh.map { it.tmdbID }.toSet()
+        (fresh + pool.await().filter { it.tmdbID !in seen }.shuffled(rnd)).take(10)
     }
 
-    fun heroLabel(m: MediaItem): String = newSeasons[m.tmdbID]?.let { "Nuova stagione $it" } ?: "In onda questa settimana"
+    fun heroLabel(m: MediaItem): String = newSeasons[m.tmdbID]?.let { "Nuova stagione $it" }
+        ?: if (m.tmdbID in onAirIDs) "In onda questa settimana" else "Serie da scoprire"
 
     // MARK: Ricerca
 
