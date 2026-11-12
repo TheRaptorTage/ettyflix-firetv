@@ -87,6 +87,8 @@ fun AppRoot(onExit: () -> Unit) {
             ProfileScreen()
             return@Box
         }
+        // sfondo delle pagine: grigio, oppure vetro scuro (Impostazioni › Aspetto e decorazioni)
+        if (!Nav.top.fullScreen && Decor.pageBG == "vetro") PageBackground()
         LaunchedEffect(Store.reloadToken) {
             runCatching { Store.bootstrap() }
             runCatching { LiveTV.loadIfNeeded() }
@@ -192,7 +194,7 @@ private fun Sidebar() {
         expanded = hasFocus
     }
     val p = Profiles.current
-    Column(
+    Box(
         Modifier
             .fillMaxHeight()
             .width(if (expanded) 210.dp else 64.dp)
@@ -201,8 +203,14 @@ private fun Sidebar() {
                 if (expanded) Brush.horizontalGradient(listOf(Color(0xF0101318), Color(0xD9101318)))
                 else Brush.horizontalGradient(listOf(Color(0xCC0B0D11), Color(0x990B0D11)))
             )
+    ) {
+    // neve, pipistrelli, foglie… dietro le voci del menu (come su Mac e Apple TV)
+    SeasonFX(Modifier.fillMaxSize())
+    Column(
+        Modifier
+            .fillMaxSize()
             .onFocusChanged { hasFocus = it.hasFocus }
-            .padding(vertical = 22.dp, horizontal = 10.dp),
+            .padding(top = 22.dp, start = 10.dp, end = 10.dp, bottom = if (expanded) 0.dp else 22.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         SideItem(null, p.name, expanded, avatar = p.color, initial = p.name.take(1)) {
@@ -218,6 +226,9 @@ private fun Sidebar() {
         SideItem(Icons.Filled.Settings, "Impostazioni", expanded, selected = Nav.tab == Screen.Settings) { Nav.selectTab(Screen.Settings) }
         Spacer(Modifier.weight(1f))
         if (expanded) Clock(Modifier.padding(start = 10.dp))
+        // disegno del periodo in fondo al menu aperto (regali, zucche, foglie…)
+        if (expanded) SeasonBottom(Modifier.padding(top = 6.dp))
+    }
     }
 }
 

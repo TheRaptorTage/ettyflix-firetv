@@ -127,15 +127,16 @@ fun HomeScreen() {
                 else Column(Modifier.padding(C.pad).padding(top = 40.dp)) { SetupHint() }
             }
         }
-        item(key = "continue") { ContinueRow() }
-        shelves.firstOrNull { it.kind == "liveTVFavorites" }?.let { fav -> item(key = "fav-ch") { FavoriteChannelsRow(fav.title) } }
+        // con "Lastre di vetro" (Impostazioni) ogni riga è appoggiata su una lastra
+        item(key = "continue") { SlabIfAny { ContinueRow() } }
+        shelves.firstOrNull { it.kind == "liveTVFavorites" }?.let { fav -> item(key = "fav-ch") { SlabIfAny { FavoriteChannelsRow(fav.title) } } }
         if (Store.hasKey) {
-            item(key = "ai-movie") { AIRow("movie") }
-            if (topTV.isNotEmpty()) item(key = "top-tv") { Top10Row("Top 10 serie della settimana", topTV) }
-            item(key = "ai-tv") { AIRow("tv") }
-            if (topMovies.isNotEmpty()) item(key = "top-mv") { Top10Row("Top 10 film della settimana", topMovies) }
+            item(key = "ai-movie") { SlabIfAny { AIRow("movie") } }
+            if (topTV.isNotEmpty()) item(key = "top-tv") { Slab { Top10Row("Top 10 serie della settimana", topTV) } }
+            item(key = "ai-tv") { SlabIfAny { AIRow("tv") } }
+            if (topMovies.isNotEmpty()) item(key = "top-mv") { Slab { Top10Row("Top 10 film della settimana", topMovies) } }
         }
-        items(shelves.filter { it.kind != "liveTVFavorites" }, key = { "sh-" + it.id }) { sh -> TileShelf(sh) }
+        items(shelves.filter { it.kind != "liveTVFavorites" }, key = { "sh-" + it.id }) { sh -> Slab { TileShelf(sh) } }
     }
 }
 
@@ -309,7 +310,11 @@ private fun Top10Row(title: String, items: List<MediaItem>) {
                     Text("${i + 1}", color = Color.White.copy(alpha = 0.92f), fontSize = 64.sp, fontWeight = FontWeight.Black,
                         style = TextStyle(shadow = Shadow(Color(0xAA000000), blurRadius = 10f)),
                         modifier = Modifier.align(Alignment.TopStart).offset(x = 8.dp, y = (-8).dp))
-                    Text(Store.genreLabel(m), color = C.dim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    // genere e voto (il voto IMDb se c'è, altrimenti quello di TMDB)
+                    var rating by remember(m.id) { mutableStateOf(com.lorenzo.ettyflix.data.Ratings.cached(m) ?: m.rating) }
+                    LaunchedEffect(m.id) { runCatching { com.lorenzo.ettyflix.data.Ratings.imdbRating(m) }.getOrNull()?.let { rating = it } }
+                    Text(Store.genreLabel(m) + if (rating > 0) "  •  ★ " + String.format(java.util.Locale.US, "%.1f", rating) else "",
+                        color = C.dim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp))
                 }
             }
@@ -361,8 +366,16 @@ private fun FavoriteChannelsRow(title: String) {
     MediaRow(title) {
         items(favs, key = { it.id }) { c ->
             Column(Modifier.width(170.dp)) {
+                // vetro colorato con il colore del logo, con luce e riflessi (come su Mac, Apple TV e iPhone)
+                LaunchedEffect(c.logo) { c.logo?.let { runCatching { LogoTint.load(it) } } }
+                val tint = c.logo?.let { LogoTint.colors[it] } ?: Color(0xFF3A3F4B)
                 FocusBox(onClick = { Nav.push(Screen.LivePlayer(c)) }, modifier = Modifier.width(170.dp).height(96.dp)) {
-                    Box(Modifier.fillMaxSize().background(Color(0xFF20242C)).padding(14.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize()
+                        .background(Brush.linearGradient(listOf(tint.copy(alpha = 0.85f), tint.copy(alpha = 0.4f), Color(0xD9000000))))
+                        .background(Brush.radialGradient(listOf(Color(0x33FFFFFF), Color.Transparent)))
+                        .background(Brush.linearGradient(0f to Color.Transparent, 0.32f to Color(0x1AFFFFFF), 0.46f to Color(0x05FFFFFF), 0.6f to Color.Transparent))
+                        .border(1.dp, Brush.linearGradient(listOf(Color(0x59FFFFFF), Color(0x0DFFFFFF), tint.copy(alpha = 0.4f))), RoundedCornerShape(10.dp))
+                        .padding(14.dp), contentAlignment = Alignment.Center) {
                         if (c.logo != null) Img(c.logo, Modifier.fillMaxSize(), ContentScale.Fit)
                         else Text(c.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }

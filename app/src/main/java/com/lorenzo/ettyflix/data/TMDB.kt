@@ -155,9 +155,11 @@ object TMDB {
         val rnd = java.util.Random(heroSlot() * 2654435761L + 97)
         val mine = async { newSeasonItems() }
         val pool = async { heroPool() }
-        val fresh = mine.await().shuffled(rnd).take(3)
+        // niente titoli usciti prima del 2013 (a volte comparivano serie vecchissime)
+        fun recent(m: MediaItem) = (m.year.take(4).toIntOrNull() ?: 9999) >= 2013
+        val fresh = mine.await().filter { recent(it) }.shuffled(rnd).take(3)
         val seen = fresh.map { it.tmdbID }.toSet()
-        (fresh + pool.await().filter { it.tmdbID !in seen }.shuffled(rnd)).take(10)
+        (fresh + pool.await().filter { it.tmdbID !in seen && recent(it) }.shuffled(rnd)).take(10)
     }
 
     fun heroLabel(m: MediaItem): String = newSeasons[m.tmdbID]?.let { "Nuova stagione $it" }

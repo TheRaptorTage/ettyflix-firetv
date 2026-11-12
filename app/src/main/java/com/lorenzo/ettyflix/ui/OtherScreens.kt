@@ -145,7 +145,7 @@ fun TilePageScreen(tile: Tile) {
         Box(Modifier.fillMaxSize().background(Color(0xCC000000)))
         LazyColumn(contentPadding = PaddingValues(top = 24.dp, bottom = 40.dp)) {
             item { Text(tile.title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = C.pad)) }
-            items(tile.sources.filter { it.kind != "traktList" || Trakt.isConfigured }, key = { it.key }) { src -> SourceRow(src) }
+            items(tile.sources.filter { it.kind != "traktList" || Trakt.isConfigured }, key = { it.key }) { src -> SlabIfAny { SourceRow(src) } }
         }
     }
 }
@@ -188,7 +188,7 @@ fun RecommendedScreen(type: String) {
             }
         }
         else items(r, key = { it.first.id }) { (seed, list) ->
-            MediaRow("Perché hai visto ${seed.title}") { items(list, key = { it.id }) { PosterCard(it, 118.dp) } }
+            Slab { MediaRow("Perché hai visto ${seed.title}") { items(list, key = { it.id }) { PosterCard(it, 118.dp) } } }
         }
     }
 }
@@ -241,6 +241,8 @@ fun SearchScreen() {
     var people by remember { mutableStateOf(listOf<PersonInfo>()) }
     var ai by remember { mutableStateOf(listOf<AIPick>()) }
     var aiBusy by remember { mutableStateOf(false) }
+    var covers by remember { mutableStateOf(mapOf<String, List<MediaItem>>()) }
+    LaunchedEffect(Unit) { if (covers.isEmpty()) covers = runCatching { BrowseLists.loadCovers() }.getOrDefault(emptyMap()) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(query) {
         val q = query.trim()
@@ -264,6 +266,22 @@ fun SearchScreen() {
                 Text("Ricerche recenti", color = C.dim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Store.recents.take(6).forEach { r -> Chip(r, false) { query = r } } }
+            }
+        }
+        // Sfoglia: le stesse liste con copertina di Mac, Apple TV e iPhone
+        if (query.isBlank()) {
+            item { Text("Sfoglia", color = C.dim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = C.pad, top = 24.dp, bottom = 6.dp)) }
+            items(BrowseLists.all.chunked(3), key = { "b-" + it.first().title }) { row ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = C.pad, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    row.forEach { b ->
+                        FocusBox(onClick = { Nav.push(Screen.Grid(b.title, listOf(b.source))) },
+                            modifier = Modifier.weight(1f).height(150.dp), shape = RoundedCornerShape(16.dp), focusScale = 1.04f) { f ->
+                            BrowseCover(b, covers[b.title] ?: emptyList(), f)
+                        }
+                    }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
             }
         }
         if (ai.isNotEmpty()) item { MediaRow("Proposte dell'IA", Icons.Filled.AutoAwesome) { items(ai, key = { "ai" + it.id }) { PosterCard(it.item, 118.dp) } } }
@@ -424,6 +442,34 @@ fun SettingsScreen() {
                 }
                 Spacer(Modifier.height(14.dp))
                 PillButton("Guarda di nuovo l'animazione") { Look.replay++ }
+            }
+        }
+        item {
+            Section("Decorazioni e vetro") {
+                @Composable fun choices(label: String, list: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
+                    Text(label, color = C.dim, fontSize = 14.sp)
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(vertical = 4.dp)) {
+                        items(list.size) { i ->
+                            val (id, title) = list[i]
+                            PillButton((if (current == id) "✓ " else "") + title, primary = current == id) { pick(id) }
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                }
+                choices("Decorazioni del periodo (nel menu laterale)", SeasonalTheme.entries.map { it.id to it.title }, Decor.seasonal.id) { id ->
+                    SeasonalTheme.entries.firstOrNull { it.id == id }?.let { Decor.setSeasonal(it) }
+                }
+                choices("Natale: tipo di neve", listOf("neve" to "Neve", "fiocchi" to "Fiocchi", "misto" to "Misto"), Decor.snowStyle) { Decor.setSnowStyle(it) }
+                choices("Natale: quanto si vede", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowLevel}") { Decor.setSnowLevel(it.toInt()) }
+                choices("Natale: quantità", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowAmount}") { Decor.setSnowAmount(it.toInt()) }
+                choices("Aspetto delle righe della Home", listOf("off" to "Classico", "lastre" to "Lastre di vetro"), Decor.homeGlass) { Decor.setHomeGlass(it) }
+                choices("Sfondo dentro le lastre", listOf("grigio" to "Nessuno", "aurora1" to "Colori appena percettibili",
+                    "aurora2" to "Colori tenui", "aurora3" to "Colori un po' più visibili"), Decor.slabBG) { Decor.setSlabBG(it) }
+                choices("Sfondo delle pagine", listOf("grigio" to "Grigio", "vetro" to "Vetro scuro"), Decor.pageBG) { Decor.setPageBG(it) }
+                choices("Colori dello sfondo delle pagine", listOf("uguale" to "Uguale all'apertura") + AuroraTheme.entries.map { it.id to it.title },
+                    Decor.pageTheme) { Decor.setPageTheme(it) }
             }
         }
         item {
