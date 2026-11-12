@@ -459,17 +459,17 @@ fun SettingsScreen() {
                     Spacer(Modifier.height(14.dp))
                 }
                 choices("Decorazioni del periodo (nel menu laterale)", SeasonalTheme.entries.map { it.id to it.title }, Decor.seasonal.id) { id ->
-                    SeasonalTheme.entries.firstOrNull { it.id == id }?.let { Decor.setSeasonal(it) }
+                    SeasonalTheme.entries.firstOrNull { it.id == id }?.let { Decor.chooseSeasonal(it) }
                 }
-                choices("Natale: tipo di neve", listOf("neve" to "Neve", "fiocchi" to "Fiocchi", "misto" to "Misto"), Decor.snowStyle) { Decor.setSnowStyle(it) }
-                choices("Natale: quanto si vede", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowLevel}") { Decor.setSnowLevel(it.toInt()) }
-                choices("Natale: quantità", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowAmount}") { Decor.setSnowAmount(it.toInt()) }
-                choices("Aspetto delle righe della Home", listOf("off" to "Classico", "lastre" to "Lastre di vetro"), Decor.homeGlass) { Decor.setHomeGlass(it) }
+                choices("Natale: tipo di neve", listOf("neve" to "Neve", "fiocchi" to "Fiocchi", "misto" to "Misto"), Decor.snowStyle) { Decor.chooseSnowStyle(it) }
+                choices("Natale: quanto si vede", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowLevel}") { Decor.chooseSnowLevel(it.toInt()) }
+                choices("Natale: quantità", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowAmount}") { Decor.chooseSnowAmount(it.toInt()) }
+                choices("Aspetto delle righe della Home", listOf("off" to "Classico", "lastre" to "Lastre di vetro"), Decor.homeGlass) { Decor.chooseHomeGlass(it) }
                 choices("Sfondo dentro le lastre", listOf("grigio" to "Nessuno", "aurora1" to "Colori appena percettibili",
-                    "aurora2" to "Colori tenui", "aurora3" to "Colori un po' più visibili"), Decor.slabBG) { Decor.setSlabBG(it) }
-                choices("Sfondo delle pagine", listOf("grigio" to "Grigio", "vetro" to "Vetro scuro"), Decor.pageBG) { Decor.setPageBG(it) }
+                    "aurora2" to "Colori tenui", "aurora3" to "Colori un po' più visibili"), Decor.slabBG) { Decor.chooseSlabBG(it) }
+                choices("Sfondo delle pagine", listOf("grigio" to "Grigio", "vetro" to "Vetro scuro"), Decor.pageBG) { Decor.choosePageBG(it) }
                 choices("Colori dello sfondo delle pagine", listOf("uguale" to "Uguale all'apertura") + AuroraTheme.entries.map { it.id to it.title },
-                    Decor.pageTheme) { Decor.setPageTheme(it) }
+                    Decor.pageTheme) { Decor.choosePageTheme(it) }
             }
         }
         item {

@@ -111,14 +111,14 @@ object Decor {
     var pageTheme by mutableStateOf(prefs.getString("home_aurora_theme", "uguale") ?: "uguale")
         private set
 
-    fun setSeasonal(v: SeasonalTheme) { seasonal = v; prefs.edit().putString("seasonal_theme", v.id).apply() }
-    fun setSnowStyle(v: String) { snowStyle = v; prefs.edit().putString("xmas_menu_snow", v).apply() }
-    fun setSnowLevel(v: Int) { snowLevel = v; prefs.edit().putInt("xmas_snow_level", v).apply() }
-    fun setSnowAmount(v: Int) { snowAmount = v; prefs.edit().putInt("xmas_snow_amount", v).apply() }
-    fun setHomeGlass(v: String) { homeGlass = v; prefs.edit().putString("mac_home_glass", v).apply() }
-    fun setSlabBG(v: String) { slabBG = v; prefs.edit().putString("mac_home_bg", v).apply() }
-    fun setPageBG(v: String) { pageBG = v; prefs.edit().putString("mac_home_page", v).apply() }
-    fun setPageTheme(v: String) { pageTheme = v; prefs.edit().putString("home_aurora_theme", v).apply() }
+    fun chooseSeasonal(v: SeasonalTheme) { seasonal = v; prefs.edit().putString("seasonal_theme", v.id).apply() }
+    fun chooseSnowStyle(v: String) { snowStyle = v; prefs.edit().putString("xmas_menu_snow", v).apply() }
+    fun chooseSnowLevel(v: Int) { snowLevel = v; prefs.edit().putInt("xmas_snow_level", v).apply() }
+    fun chooseSnowAmount(v: Int) { snowAmount = v; prefs.edit().putInt("xmas_snow_amount", v).apply() }
+    fun chooseHomeGlass(v: String) { homeGlass = v; prefs.edit().putString("mac_home_glass", v).apply() }
+    fun chooseSlabBG(v: String) { slabBG = v; prefs.edit().putString("mac_home_bg", v).apply() }
+    fun choosePageBG(v: String) { pageBG = v; prefs.edit().putString("mac_home_page", v).apply() }
+    fun choosePageTheme(v: String) { pageTheme = v; prefs.edit().putString("home_aurora_theme", v).apply() }
 
     /** tema dei colori delle pagine e delle lastre */
     val pageColors: AuroraTheme
