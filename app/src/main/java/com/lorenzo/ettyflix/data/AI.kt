@@ -255,7 +255,7 @@ object AI {
         val prompt = "Traduci in italiano naturale e breve, come un sottotitolo italiano, questa battuta di un film o di una serie. " +
             "Rispondi solo con la traduzione, senza virgolette né commenti.\n\n$text"
         val now = System.currentTimeMillis()
-        for (model in models().filter { (resting[it] ?: 0L) < now }.take(3)) {
+        for (model in models().filter { (resting[it] ?: 0L) < now && !it.contains("2.5") && !it.contains("2.0") }.take(3)) {
             val gen = JSONObject().put("temperature", 0.2)
             if (model.contains("2.5")) gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
             val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
