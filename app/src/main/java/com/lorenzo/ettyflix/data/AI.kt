@@ -246,6 +246,31 @@ object AI {
         return out
     }
 
+    /** modelli momentaneamente al limite di richieste → fino a quando (millisecondi) */
+    private val resting = HashMap<String, Long>()
+
+    /** Traduce una frase di sottotitolo in italiano (veloce: niente attese lunghe, se un modello è al limite passo al successivo). */
+    suspend fun translateSubtitle(text: String): String? {
+        if (!hasKey || text.isBlank()) return null
+        val prompt = "Traduci in italiano naturale e breve, come un sottotitolo italiano, questa battuta di un film o di una serie. " +
+            "Rispondi solo con la traduzione, senza virgolette né commenti.\n\n$text"
+        val now = System.currentTimeMillis()
+        for (model in models().filter { (resting[it] ?: 0L) < now }.take(3)) {
+            val gen = JSONObject().put("temperature", 0.2)
+            if (model.contains("2.5")) gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+            val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
+                .put("generationConfig", gen)
+            val r = Http.request("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent", "POST",
+                body.toString(), mapOf("x-goog-api-key" to apiKey, "Content-Type" to "application/json"), 12)
+            if (r.code == 429) { resting[model] = now + 65_000; continue }
+            if (!r.ok) continue
+            val out = r.json()?.arr("candidates")?.firstOrNull()?.obj("content")?.arr("parts")
+                ?.joinToString("") { it.str("text") ?: "" }?.trim()?.trim('"') ?: ""
+            if (out.isNotEmpty()) return out
+        }
+        return null
+    }
+
     /** Ricerca "a parole": l'IA propone titoli che corrispondono alla descrizione. */
     suspend fun searchByDescription(q: String): List<AIPick> {
         val prompt = """

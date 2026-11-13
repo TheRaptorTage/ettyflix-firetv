@@ -135,7 +135,7 @@ fun buildPlayer(ctx: Context): ExoPlayer {
 
 @OptIn(UnstableApi::class)
 @Composable
-fun VideoSurface(player: ExoPlayer) {
+fun VideoSurface(player: ExoPlayer, forced: ForcedSubsController? = null) {
     AndroidView(factory = { c ->
         PlayerView(c).apply {
             useController = false
@@ -143,8 +143,11 @@ fun VideoSurface(player: ExoPlayer) {
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             setShutterBackgroundColor(android.graphics.Color.BLACK)
             this.player = player
+            // dopo il player: così la traduzione arriva dopo la frase originale e la sostituisce
+            forced?.let { it.view = subtitleView; it.attach() }
         }
     }, modifier = Modifier.fillMaxSize())
+    if (forced != null) DisposableEffect(forced) { onDispose { forced.detach() } }
 }
 
 private data class TrackItem(val group: Tracks.Group, val index: Int, val label: String, val selected: Boolean)
@@ -180,6 +183,8 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val player = remember { buildPlayer(ctx) }
+    /** forced inglese tradotto in italiano, tutto da solo */
+    val forcedSubs = remember { ForcedSubsController(player, scope) }
     var srcList by remember { mutableStateOf(sources) }
     var index by remember { mutableIntStateOf(selected.coerceIn(0, (sources.size - 1).coerceAtLeast(0))) }
     var position by remember { mutableDoubleStateOf(req.startAt) }
@@ -507,7 +512,7 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
             }
             .focusable()
     ) {
-        VideoSurface(player)
+        VideoSurface(player, forcedSubs)
 
         if (!started || buffering) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -684,6 +689,7 @@ private fun OptionsPanel(player: ExoPlayer, kind: String, sources: List<PlayerSo
             if (kind == "subs") PanelColumn("Sottotitoli", Modifier.weight(1f)) {
                 item {
                     PanelButton("Disattivati", subsOff, Modifier.focusRequester(first)) {
+                        ForcedSubs.active?.userSelected()
                         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                             .setTrackTypeDisabled(MC.TRACK_TYPE_TEXT, true).build()
                         refresh++
@@ -692,6 +698,7 @@ private fun OptionsPanel(player: ExoPlayer, kind: String, sources: List<PlayerSo
                 }
                 itemsIndexed(subs) { _, s ->
                     PanelButton(s.label, s.selected && !subsOff) {
+                        ForcedSubs.active?.userSelected()
                         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                             .setTrackTypeDisabled(MC.TRACK_TYPE_TEXT, false)
                             .setOverrideForType(TrackSelectionOverride(s.group.mediaTrackGroup, s.index)).build()
