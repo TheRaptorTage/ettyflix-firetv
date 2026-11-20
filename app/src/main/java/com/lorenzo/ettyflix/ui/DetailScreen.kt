@@ -219,6 +219,11 @@ fun DetailScreen(start: MediaItem) {
                         items(detail!!.seasons.filter { it.episodeCount > 0 }, key = { it.id }) { s ->
                             SeasonPill(s.name, s.number == season) { season = s.number }
                         }
+                        // episodi visti / usciti ("21/55") accanto alle stagioni, come su Apple TV
+                        item(key = "episode-count") {
+                            com.lorenzo.ettyflix.data.EpisodesBadge(item.tmdbID, 15.sp, dark = false,
+                                modifier = Modifier.padding(start = 6.dp, top = 4.dp))
+                        }
                     }
                 }
                 item(key = "episodes") {

@@ -258,6 +258,11 @@ fun ContinueCard(t: ContinueTarget) {
             Box(Modifier.fillMaxSize().background(C.panel)) {
                 Img(TMDBImage.url(t.stillPath ?: e.backdropPath, "w780"), Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Color(0xD9000000))))
+                // episodi visti / usciti ("21/55"), come su Apple TV
+                if (e.mediaType == "tv") {
+                    com.lorenzo.ettyflix.data.EpisodesBadge(e.tmdbID, 11.sp, dark = true,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
+                }
                 Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
                     Text(e.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     val sub = if (t.season != null && t.episode != null)

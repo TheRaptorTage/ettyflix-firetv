@@ -134,6 +134,19 @@ data class StreamSource(
         return Regex("\\b(sub|subs|subbed|forced)[ ._-]?ita\\b", RegexOption.IGNORE_CASE).containsMatchIn("$title $fileName")
     }
 
+    /** "Sottotitolato" solo se ci sono i forced (italiani o inglesi da tradurre), come su Apple TV:
+     *  se il file è già stato aperto conta quello che c'era davvero. */
+    val hasUsableSubs: Boolean get() {
+        SubsKnowledge.known(fileName, sizeLabel)?.let { return it }
+        val texts = listOf(fileName) + title.lines().filter { it.contains("📝") }
+        for (t in texts) {
+            val x = t.lowercase()
+            if (!x.contains("forced")) continue
+            if (Regex("\\b(ita|italian|italiano|eng|english|inglese)\\b").containsMatchIn(x) || x.contains("🇮🇹")) return true
+        }
+        return hasItalianSubs
+    }
+
     /** Nome dell'addon che ha trovato la fonte (Meteor, Comet, MediaFusion…), preso dalla descrizione. */
     val addonName: String get() = addonNameOf(title)
 
@@ -280,6 +293,14 @@ object Jellyfin {
      *  Ogni ricerca riparte dal principale, quindi appena torna a funzionare si usa di nuovo lui. */
     suspend fun allSources(m: MediaItem, season: Int?, episode: Int?, fresh: Boolean = false,
                            progress: (suspend (List<StreamSource>) -> Unit)? = null): List<StreamSource> {
+        // via le fonti che sappiamo dare un altro episodio (vedi EpisodeGuard)
+        val filtered: (suspend (List<StreamSource>) -> Unit)? =
+            if (progress == null) null else { l -> progress(EpisodeGuard.filter(l, m.tmdbID, season, episode)) }
+        return EpisodeGuard.filter(allSourcesRaw(m, season, episode, fresh, filtered), m.tmdbID, season, episode)
+    }
+
+    private suspend fun allSourcesRaw(m: MediaItem, season: Int?, episode: Int?, fresh: Boolean,
+                           progress: (suspend (List<StreamSource>) -> Unit)?): List<StreamSource> {
         val first = runCatching { allSourcesOnServer(m, season, episode, fresh, progress) }.getOrDefault(emptyList())
         if (first.any { !it.isError } || !BackupAddon.isConfigured) return first
         val backup = runCatching { BackupAddon.sources(m, season, episode) }.getOrDefault(emptyList())

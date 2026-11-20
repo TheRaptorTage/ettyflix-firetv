@@ -81,7 +81,7 @@ fun ProfileScreen() {
     var adding by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         EttyProfileBackground()   // stesso sfondo dell'animazione d'apertura (colore scelto nelle Impostazioni)
-        ProfileClock(Modifier.align(Alignment.TopEnd).padding(36.dp))
+        ProfileClock(Modifier.align(Alignment.TopEnd).padding(26.dp))   // stesse proporzioni del Mac
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Chi vuole guardare?", style = TextStyle(
                 brush = Brush.verticalGradient(listOf(Color.White, Color.White.copy(alpha = 0.82f))),
@@ -141,9 +141,9 @@ private fun ProfileClock(modifier: Modifier) {
         shadow = Shadow(Color(0x73000000), Offset(0f, 3f), 8f))
     Column(modifier, horizontalAlignment = Alignment.End) {
         Text(java.text.SimpleDateFormat("HH:mm", java.util.Locale.ITALIAN).format(now), style = glassText,
-            fontSize = 54.sp, fontWeight = FontWeight.Medium)
+            fontSize = 44.sp, fontWeight = FontWeight.Medium)
         Text(java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.ITALIAN).format(now).replaceFirstChar { it.uppercase() },
-            style = glassText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            style = glassText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

@@ -85,6 +85,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.lorenzo.ettyflix.data.Episode
+import com.lorenzo.ettyflix.data.EpisodeGuard
+import com.lorenzo.ettyflix.data.SubsKnowledge
 import com.lorenzo.ettyflix.data.IntroService
 import com.lorenzo.ettyflix.data.Jellyfin
 import com.lorenzo.ettyflix.data.LiveChannel
@@ -187,6 +189,8 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
     val forcedSubs = remember { ForcedSubsController(player, scope) }
     var srcList by remember { mutableStateOf(sources) }
     var index by remember { mutableIntStateOf(selected.coerceIn(0, (sources.size - 1).coerceAtLeast(0))) }
+    // ricordo se il file che sto guardando ha davvero un forced (per "Sottotitolato" nelle fonti)
+    forcedSubs.onKnown = { found -> srcList.getOrNull(index)?.let { SubsKnowledge.record(it.fileName, it.size, found) } }
     var position by remember { mutableDoubleStateOf(req.startAt) }
     var duration by remember { mutableDoubleStateOf(0.0) }
     var playing by remember { mutableStateOf(true) }
@@ -397,7 +401,9 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         if (ep == null) ep = TMDB.episodes(req.media.tmdbID, s + 1).firstOrNull()
         val n = ep ?: return@LaunchedEffect
         if (n.airDate.isNotEmpty() && n.airDate > todayString()) return@LaunchedEffect
-        val found = withTimeoutOrNull(45_000) { Jellyfin.allSources(req.media, n.season, n.number) } ?: return@LaunchedEffect
+        val raw = withTimeoutOrNull(45_000) { Jellyfin.allSources(req.media, n.season, n.number) } ?: return@LaunchedEffect
+        // fonti che danno un altro episodio: le scopro adesso, mentre guardi, e le tolgo
+        val found = withTimeoutOrNull(40_000) { EpisodeGuard.check(raw, req.media.tmdbID, n.season, n.number) } ?: raw
         val sorted = Jellyfin.sorted(found).filter { !it.isError && it.url != null }
         if (sorted.isEmpty()) return@LaunchedEffect
         SourceCache.put(req.media, n.season, n.number, found)

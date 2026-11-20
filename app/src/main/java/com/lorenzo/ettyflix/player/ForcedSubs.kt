@@ -33,6 +33,8 @@ import java.io.File
 class ForcedSubsController(private val player: ExoPlayer, private val scope: CoroutineScope) : Player.Listener {
     /** il riquadro dei sottotitoli del player */
     var view: SubtitleView? = null
+    /** chiamato quando so se il file ha un forced (per l'etichetta "Sottotitolato" nelle fonti) */
+    var onKnown: ((Boolean) -> Unit)? = null
     private var userPicked = false
     private var decidedFor: String? = null
     /** lingua da tradurre (null = mostro i sottotitoli così come sono) */
@@ -92,6 +94,15 @@ class ForcedSubsController(private val player: ExoPlayer, private val scope: Cor
             val score = if (lang.startsWith("en") || "english" in (f.label ?: "").lowercase()) 10 else 1
             if (score > foreignScore) { foreign = g to i; foreignScore = score }
         }
+        // forced italiano non segnato: audio italiano con due o più sottotitoli italiani (es. Power:
+        // "Italiano" [predefinito] = forced, l'altro = completo). Scelgo quello predefinito.
+        val audioIt = tracks.groups.any { g -> g.type == C.TRACK_TYPE_AUDIO && (0 until g.length).any { isItalian(g, it) } }
+        val itSubs = text.flatMap { g -> (0 until g.length).filter { g.isTrackSupported(it) && isItalian(g, it) }.map { g to it } }
+        val twoItalian = audioIt && itSubs.size >= 2
+        if (italian == null && twoItalian) {
+            italian = itSubs.firstOrNull { (g, i) -> (g.getTrackFormat(i).selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0 } ?: itSubs.first()
+        }
+        onKnown?.invoke(foreign != null || italian != null)
         val pick = foreign ?: italian ?: return
         translateLang = if (foreign != null) (pick.first.getTrackFormat(pick.second).language ?: "en") else null
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
