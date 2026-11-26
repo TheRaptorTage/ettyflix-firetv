@@ -460,7 +460,12 @@ object WatchProgress {
                 best[e.tmdbID] = e
             }
             return best.values.filter { e ->
-                if (e.mediaType == "movie") !e.finished else true
+                if (e.mediaType == "movie") !e.finished
+                else {
+                    // serie finita (tutti gli episodi usciti visti) e nessun episodio a metà: fuori
+                    val aired = CompletedModel.knownAired(e.tmdbID)
+                    !(e.finished && aired != null && aired > 0 && EpisodeCounts.watched(e.tmdbID) >= aired)
+                }
             }.sortedByDescending { it.updated }
         }
 
@@ -593,8 +598,18 @@ data class ContinueTarget(
 suspend fun resolveContinue(e: WatchEntry): ContinueTarget? {
     if (!e.finished) return ContinueTarget(e, e.season, e.episode, e.episodeTitle, e.stillPath, e.position, false)
     if (e.mediaType != "tv" || e.season == null || e.episode == null) return null
-    var next = TMDB.episodes(e.tmdbID, e.season).firstOrNull { it.number == e.episode + 1 }
-    if (next == null) next = TMDB.episodes(e.tmdbID, e.season + 1).firstOrNull()
+    // serie di cui hai visto tutti gli episodi usciti: niente "prossimo episodio" (torna quando esce il nuovo)
+    val aired = CompletedModel.airedCount(e.tmdbID)
+    if (aired != null && aired > 0 && EpisodeCounts.watched(e.tmdbID) >= aired) return null
+    // il primo episodio dopo l'ultimo visto che NON hai ancora visto (salta quelli già visti), fino a 3 stagioni avanti
+    fun seen(sn: Int, en: Int) = WatchProgress.entries[WatchEntry.key(e.tmdbID, "tv", sn, en)]?.finished == true
+    var next: Episode? = null
+    for (sn in e.season..(e.season + 3)) {
+        val list = TMDB.episodes(e.tmdbID, sn)
+        if (list.isEmpty()) { if (sn == e.season) break else continue }
+        next = list.firstOrNull { (sn > e.season || it.number > e.episode) && !seen(sn, it.number) }
+        if (next != null) break
+    }
     val n = next ?: return null
     if (n.airDate.isNotEmpty() && n.airDate > todayString()) return null
     return ContinueTarget(e, n.season, n.number, n.name, n.stillPath, 0.0, true)

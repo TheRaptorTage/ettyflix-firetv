@@ -406,7 +406,10 @@ object CompletedModel {
         }
     }
 
-    private suspend fun airedCount(id: Int): Int? {
+    /** episodi usciti già noti (anche di qualche giorno fa), senza rete */
+    fun knownAired(id: Int): Int? = aired[id]?.first
+
+    suspend fun airedCount(id: Int): Int? {
         aired[id]?.let { if (System.currentTimeMillis() - it.second < 86_400_000) return it.first }
         val j = TMDB.get("tv/$id") ?: return aired[id]?.first
         val last = j.optJSONObject("last_episode_to_air") ?: return null
