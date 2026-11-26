@@ -481,7 +481,7 @@ object ForYouModel {
                 if (bad.isNotEmpty()) p["without_genres"] = bad
                 for (x in TMDB.get("discover/$type", p)?.arr("results") ?: emptyList()) {
                     val m = MediaItem.from(x, type) ?: continue
-                    if (16 in m.genreIDs) continue
+                    if (16 in m.genreIDs || TMDB.isTalkShow(m)) continue
                     items += m
                     dates[m.id] = x.str("release_date") ?: x.str("first_air_date") ?: ""
                 }

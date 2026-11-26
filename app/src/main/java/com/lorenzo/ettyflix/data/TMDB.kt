@@ -39,8 +39,14 @@ object TMDB {
             (q["with_genres"] ?: "").split(',', '|').contains("16") ||
             (q["with_keywords"] ?: "").contains("210024") ||
             (q["with_original_language"] == "ja" && (q["with_genres"] ?: "").isEmpty())
-        return if (wanted) list else list.filter { 16 !in it.genreIDs }
+        // niente talk show, notiziari, reality e quiz (se non li hai già iniziati tu)
+        val started = WatchProgress.startedIDs
+        val noTalk = list.filter { !isTalkShow(it) || it.tmdbID in started }
+        return if (wanted) noTalk else noTalk.filter { 16 !in it.genreIDs }
     }
+
+    /** talk show, notiziari, reality e quiz (Notizie 10763, Reality 10764, Talk 10767): non doppiati, mai guardati */
+    fun isTalkShow(m: MediaItem) = m.mediaType == "tv" && m.genreIDs.any { it == 10763 || it == 10764 || it == 10767 }
 
     suspend fun fetchPage(src: SourceDef, page: Int): List<MediaItem> = when (src.kind) {
         "traktList" -> Trakt.listItems(src.listID ?: 0, src.path, page)
@@ -52,7 +58,7 @@ object TMDB {
         }
         "tmdbList" -> {
             val id = src.listID
-            if (id == null) emptyList() else parse(get("list/$id", mapOf("page" to page.toString()))?.arr("items") ?: emptyList(), src.mediaType)
+            if (id == null) emptyList() else parse(get("list/$id", mapOf("page" to page.toString()))?.arr("items") ?: emptyList(), src.mediaType).filter { !isTalkShow(it) }
         }
         else -> {
             val q = src.params.toMutableMap()
@@ -187,7 +193,7 @@ object TMDB {
     }
 
     suspend fun recommendations(type: String, id: Int): List<MediaItem> =
-        parse(get("$type/$id/recommendations")?.arr("results") ?: emptyList(), type)
+        parse(get("$type/$id/recommendations")?.arr("results") ?: emptyList(), type).filter { !isTalkShow(it) }
 
     // MARK: Dettaglio
 
