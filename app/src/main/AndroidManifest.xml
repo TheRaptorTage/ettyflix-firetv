@@ -12,14 +12,16 @@
     <application
         android:name=".EttyFlixApp"
         android:allowBackup="true"
-        android:banner="@drawable/banner"
-        android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/banner_tramonto"
+        android:icon="@mipmap/ic_launcher_tramonto"
         android:label="EttyFlix"
         android:usesCleartextTraffic="true"
         android:largeHeap="true"
         android:theme="@style/Theme.EttyFlix">
         <activity
             android:name=".MainActivity"
+            android:banner="@drawable/banner_tramonto"
+            android:icon="@mipmap/ic_launcher_tramonto"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
             android:screenOrientation="landscape"
