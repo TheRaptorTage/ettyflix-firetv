@@ -115,7 +115,7 @@ object AI {
         return best.values.sortedByDescending { it.updated }.take(limit).map { H(it.tmdbID, it.mediaType, it.title) }
     }
 
-    private val seenKeys: Set<String> get() = WatchProgress.entries.values.map { "${it.mediaType}-${it.tmdbID}" }.toSet()
+    private val seenKeys: Set<String> get() = WatchProgress.startedKeys   // un clic per sbaglio non conta come "visto"
 
     // MARK: Consigli per la Home
 

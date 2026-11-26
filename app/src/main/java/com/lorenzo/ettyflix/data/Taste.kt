@@ -226,7 +226,7 @@ object TasteProfile {
         val seeds = seeds(entries, Store.ratings, Store.disliked, Store.abandoned, rejections)
         TasteFeatureStore.fetch(seeds.map { it.type to it.tmdbID }, 80)
         if (Profiles.currentID != owner) return   // nel frattempo hai cambiato profilo
-        val built = TasteVector.build(seeds, entries.map { "${it.mediaType}-${it.tmdbID}" }.toSet(), TasteFeatureStore.all)
+        val built = TasteVector.build(seeds, entries.filter { WatchProgress.counts(it) }.map { "${it.mediaType}-${it.tmdbID}" }.toSet(), TasteFeatureStore.all)
         calibrate(built)
         if (Profiles.currentID != owner) return
         mine = built
@@ -271,7 +271,7 @@ object TasteProfile {
         val entries = WatchProgress.readEntries(profileID)
         val seeds = seeds(entries, ratings, list("disliked.json"), list("abandoned.json"), rej)
         TasteFeatureStore.fetch(seeds.map { it.type to it.tmdbID }, 80)
-        return TasteVector.build(seeds, entries.map { "${it.mediaType}-${it.tmdbID}" }.toSet(), TasteFeatureStore.all)
+        return TasteVector.build(seeds, entries.filter { WatchProgress.counts(it) }.map { "${it.mediaType}-${it.tmdbID}" }.toSet(), TasteFeatureStore.all)
             .also { calibrate(it) }
     }
 
@@ -557,7 +557,7 @@ object ForYouModel {
         cal.add(Calendar.DAY_OF_YEAR, 6)
         val to = f.format(cal.time)
         val eps = CalendarModel.episodes.filter { it.airDate in from..to }
-        val started = WatchProgress.entries.values.map { it.tmdbID }.toSet()
+        val started = WatchProgress.startedIDs
         val pool = Store.watchlist.filter { it.mediaType == "movie" && it.tmdbID !in started } +
             AI.moviePicks.map { it.item } + rows.filter { it.id != "upcoming" }.flatMap { it.items }.filter { it.mediaType == "movie" }
         val movies = pool.distinctBy { it.id }.filter { !Store.isNotInterested(it) && it.id !in TasteProfile.rejectedIDs }

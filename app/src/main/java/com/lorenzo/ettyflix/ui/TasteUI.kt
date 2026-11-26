@@ -65,9 +65,9 @@ fun MatchBadge(item: MediaItem, modifier: Modifier = Modifier, size: Int = 11) {
         return
     }
     if (!EttyFlixApp.prefs.getBoolean("match_badge", true)) return
+    // sempre visibile, anche bassa: così si capisce subito cosa non è nei tuoi gusti
     val p = TasteProfile.percent(item) ?: return
-    if (p < 65) return
-    Text("$p%", color = if (p >= 85) TasteGood else Color.White, fontSize = size.sp, fontWeight = FontWeight.Bold,
+    Text("$p%", color = if (p >= 85) TasteGood else if (p < 50) Color(0xB3FFFFFF) else Color.White, fontSize = size.sp, fontWeight = FontWeight.Bold,
         modifier = modifier.clip(RoundedCornerShape(50)).background(Color(0x8C000000)).padding(horizontal = 7.dp, vertical = 2.dp))
 }
 
@@ -81,7 +81,7 @@ fun WhyForYouLine(item: MediaItem) {
             TasteProfile.featuresChanged()
         }
     }
-    val seen = WatchProgress.entries.values.any { it.tmdbID == item.tmdbID } || Store.ratings.containsKey(item.id)
+    val seen = item.tmdbID in WatchProgress.startedIDs || Store.ratings.containsKey(item.id)
     if (seen) return
     val pct = TasteProfile.percent(item)
     val why = TasteProfile.reason(item)

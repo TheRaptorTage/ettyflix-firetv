@@ -131,7 +131,7 @@ object TMDB {
     /** Serie belle e attuali da cui pescare a caso (in onda, di tendenza, popolari), escluse quelle che stai guardando. */
     suspend fun heroPool(): List<MediaItem> {
         val bad = setOf(16, 10762, 10763, 10764, 10766, 10767)
-        val known = WatchProgress.entries.values.map { it.tmdbID }.toSet()
+        val known = WatchProgress.startedIDs
         val out = mutableListOf<MediaItem>()
         val sources = listOf("tv/on_the_air" to mapOf("page" to "1"), "tv/on_the_air" to mapOf("page" to "2"),
             "tv/on_the_air" to mapOf("page" to "3"), "trending/tv/day" to emptyMap<String, String>(), "trending/tv/week" to emptyMap<String, String>(),

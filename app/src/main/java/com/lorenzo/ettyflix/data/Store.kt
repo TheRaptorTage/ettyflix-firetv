@@ -202,7 +202,7 @@ object Store {
     /** "Da guardare": la watchlist senza i titoli già iniziati e senza quelli "Non mi piace"/abbandonati. */
     val toWatch: List<MediaItem>
         get() {
-            val started = WatchProgress.entries.values.map { it.tmdbID }.toSet()
+            val started = WatchProgress.startedIDs   // un clic per sbaglio non conta (vedi WatchProgress.counts)
             val skip = notInterestedIDs
             return watchlist.filter { it.tmdbID !in started && it.id !in skip }
         }
@@ -368,25 +368,43 @@ object WatchProgress {
 
     fun latest(tmdbID: Int): WatchEntry? = entries.values.filter { it.tmdbID == tmdbID }.maxByOrNull { it.updated }
 
+    /** Un titolo conta come "iniziato" solo se l'hai guardato davvero: un film almeno 10 minuti (o metà, se è più corto),
+     *  un episodio almeno 30 minuti (o il 60%, se è più corto), oppure finito. Prima bastava 1 minuto: un clic per sbaglio
+     *  lo metteva in "Visti di recente", lo toglieva da "Da guardare" e faceva sparire la percentuale "per te". */
+    fun counts(e: WatchEntry): Boolean {
+        if (e.finished) return true
+        val movie = e.mediaType == "movie"
+        val need = if (movie) 600.0 else 1800.0
+        val limit = if (e.duration > 0) minOf(need, e.duration * (if (movie) 0.5 else 0.6)) else need
+        return e.position >= limit
+    }
+
+    /** tmdbID dei titoli davvero iniziati */
+    val startedIDs: Set<Int> get() = entries.values.filter { counts(it) }.map { it.tmdbID }.toSet()
+    /** "tipo-id" dei titoli davvero iniziati */
+    val startedKeys: Set<String> get() = entries.values.filter { counts(it) }.map { "${it.mediaType}-${it.tmdbID}" }.toSet()
+
     val continueWatching: List<WatchEntry>
         get() {
+            val started = startedIDs
             val best = HashMap<Int, WatchEntry>()
             for (e in entries.values) {
-                if (e.tmdbID in hiddenFromContinue) continue
+                if (e.tmdbID in hiddenFromContinue || e.tmdbID !in started) continue
                 val cur = best[e.tmdbID]
                 if (cur != null && cur.updated >= e.updated) continue
                 best[e.tmdbID] = e
             }
             return best.values.filter { e ->
-                if (e.mediaType == "movie") !e.finished && e.position > 60 else e.finished || e.position > 60
+                if (e.mediaType == "movie") !e.finished else true
             }.sortedByDescending { it.updated }
         }
 
     val history: List<WatchEntry>
         get() {
+            val started = startedIDs
             val best = HashMap<Int, WatchEntry>()
             for (e in entries.values) {
-                if (!(e.finished || e.position > 60)) continue
+                if (e.tmdbID !in started) continue
                 val cur = best[e.tmdbID]
                 if (cur != null && cur.updated >= e.updated) continue
                 best[e.tmdbID] = e
