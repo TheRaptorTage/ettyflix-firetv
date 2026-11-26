@@ -93,6 +93,12 @@ object Store {
     var genreNames by mutableStateOf(mapOf<Int, String>())
     var reloadToken by mutableIntStateOf(0)
     var recents by mutableStateOf(listOf<String>())
+    /** voti 1–10 dati dall'utente (chiave = MediaItem.id, es. "movie-603") */
+    var ratings by mutableStateOf(mapOf<String, Int>())
+    /** titoli segnati "Non mi piace" */
+    var disliked by mutableStateOf(listOf<MediaItem>())
+    /** titoli abbandonati a metà */
+    var abandoned by mutableStateOf(listOf<MediaItem>())
 
     init {
         val text = DataDir.read("config.json") ?: EttyFlixApp.prefs.getString("config_backup", null)
@@ -107,6 +113,11 @@ object Store {
 
     fun reloadProfileData() {
         watchlist = loadList(Profiles.file("watchlist.json"))
+        disliked = loadList(Profiles.file("disliked.json"))
+        abandoned = loadList(Profiles.file("abandoned.json"))
+        ratings = DataDir.read(Profiles.file("ratings.json"))?.let { t ->
+            runCatching { val o = JSONObject(t); o.keys().asSequence().associateWith { o.getInt(it) } }.getOrNull()
+        } ?: emptyMap()
         recents = EttyFlixApp.prefs.getString(Profiles.key("recents"), "")!!.split("\n").filter { it.isNotBlank() }
     }
 
@@ -179,6 +190,54 @@ object Store {
         watchlist = if (adding) listOf(m) + watchlist else watchlist.filter { it.id != m.id }
         saveList(watchlist, Profiles.file("watchlist.json"))
         Trakt.pushWatchlist(m, adding)
+    }
+
+    /** "Da guardare": la watchlist senza i titoli già iniziati e senza quelli "Non mi piace"/abbandonati. */
+    val toWatch: List<MediaItem>
+        get() {
+            val started = WatchProgress.entries.values.map { it.tmdbID }.toSet()
+            val skip = notInterestedIDs
+            return watchlist.filter { it.tmdbID !in started && it.id !in skip }
+        }
+
+    // MARK: Voti, Non mi piace, Abbandonati
+
+    fun rating(m: MediaItem): Int = ratings[m.id] ?: 0
+
+    fun setRating(m: MediaItem, value: Int) {
+        val r = ratings.toMutableMap()
+        if (value in 1..10) r[m.id] = value else r.remove(m.id)
+        ratings = r
+        val o = JSONObject(); r.forEach { (k, v) -> o.put(k, v) }
+        DataDir.write(Profiles.file("ratings.json"), o.toString())
+    }
+
+    fun isDisliked(m: MediaItem) = disliked.any { it.id == m.id }
+    fun isAbandoned(m: MediaItem) = abandoned.any { it.id == m.id }
+    fun isNotInterested(m: MediaItem) = isDisliked(m) || isAbandoned(m)
+    val notInterestedIDs: Set<String> get() = (disliked.map { it.id } + abandoned.map { it.id }).toSet()
+    /** Categoria della Libreria "Non mi piace / Abbandonato". */
+    val notInterested: List<MediaItem> get() = (disliked + abandoned).distinctBy { it.id }
+
+    fun toggleDisliked(m: MediaItem) {
+        disliked = if (isDisliked(m)) disliked.filter { it.id != m.id } else listOf(m) + disliked
+        saveList(disliked, Profiles.file("disliked.json"))
+        if (isDisliked(m)) {
+            WatchProgress.hide(m.tmdbID)
+            if (inWatchlist(m)) toggleWatchlist(m)
+        }
+    }
+
+    /** Abbandona: via da "Continua a guardare" e dalla watchlist, finisce in "Non mi piace / Abbandonato". */
+    fun markAbandoned(m: MediaItem) {
+        if (!isAbandoned(m)) { abandoned = listOf(m) + abandoned; saveList(abandoned, Profiles.file("abandoned.json")) }
+        WatchProgress.hide(m.tmdbID)
+        if (inWatchlist(m)) toggleWatchlist(m)
+    }
+
+    fun clearNotInterested(m: MediaItem) {
+        disliked = disliked.filter { it.id != m.id }; saveList(disliked, Profiles.file("disliked.json"))
+        abandoned = abandoned.filter { it.id != m.id }; saveList(abandoned, Profiles.file("abandoned.json"))
     }
 
     /** Watchlist uguale a quella dell'account Trakt del profilo (una volta sola). */
@@ -378,6 +437,14 @@ object WatchProgress {
         val all = seasons.flatMap { TMDB.episodes(m.tmdbID, it) }
         if (all.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { setSeason(m, all, true) }
     }
+
+    fun hide(tmdbID: Int) {
+        if (tmdbID in hiddenFromContinue) return
+        hiddenFromContinue = hiddenFromContinue + tmdbID
+        save()
+    }
+
+    fun isInProgress(tmdbID: Int) = continueWatching.any { it.tmdbID == tmdbID }
 
     fun removeFromContinue(e: WatchEntry) {
         hiddenFromContinue = hiddenFromContinue + e.tmdbID

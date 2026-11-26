@@ -1,5 +1,7 @@
 package com.lorenzo.ettyflix.ui
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -112,13 +114,14 @@ fun AppRoot(onExit: () -> Unit) {
                 val p = com.lorenzo.ettyflix.EttyFlixApp.prefs
                 val on = p.getBoolean("screensaver_on", true)
                 val minutes = p.getInt("screensaver_minutes", 5)
-                if (on && !Idle.saver && !Nav.top.fullScreen && Nav.menu == null &&
+                if (on && !Idle.saver && !Nav.top.fullScreen && Nav.menu == null && Nav.rate == null &&
                     android.os.SystemClock.uptimeMillis() - Idle.lastKey > minutes * 60_000L &&
                     (Store.watchlist.isNotEmpty() || WatchProgress.history.isNotEmpty())) Idle.saver = true
             }
         }
         BackHandler {
             when {
+                Nav.rate != null -> Nav.rate = null
                 Nav.menu != null -> Nav.menu = null
                 Nav.pop() -> {}
                 Nav.tab != Screen.Home -> Nav.selectTab(Screen.Home)
@@ -129,8 +132,8 @@ fun AppRoot(onExit: () -> Unit) {
         // non sul menu laterale: se la pagina non lo prende da sola, lo porto io sul primo elemento.
         val contentFocus = remember { FocusRequester() }
         var contentHasFocus by remember { mutableStateOf(false) }
-        LaunchedEffect(top, Nav.menu == null) {
-            if (Nav.menu != null) return@LaunchedEffect
+        LaunchedEffect(top, Nav.menu == null && Nav.rate == null) {
+            if (Nav.menu != null || Nav.rate != null) return@LaunchedEffect
             repeat(12) {
                 delay(90)
                 if (contentHasFocus) return@LaunchedEffect
@@ -151,6 +154,7 @@ fun AppRoot(onExit: () -> Unit) {
             }
         }
         Nav.menu?.let { MediaMenu(it) }
+        Nav.rate?.let { RatingDialog(it) }
         if (Idle.saver) ScreensaverScreen()
     }
 }
@@ -291,9 +295,10 @@ private fun MediaMenu(req: MenuReq) {
             ok && n.eventTime - openedAt < 800
         }, contentAlignment = Alignment.Center) {
         Column(
-            Modifier.width(380.dp).background(C.panel, RoundedCornerShape(20.dp))
-                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp)).padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier.width(380.dp).heightIn(max = 500.dp).background(C.panel, RoundedCornerShape(20.dp))
+                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                .verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(req.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2)
             Spacer(Modifier.height(4.dp))
@@ -314,6 +319,16 @@ private fun MediaMenu(req: MenuReq) {
                             close(); com.lorenzo.ettyflix.data.Trakt.scope.launch { WatchProgress.setSeries(item, false) }
                         }
                     }
+                }
+                val r = Store.rating(item)
+                PillButton(if (r > 0) "Il tuo voto: $r/10" else "Dai un voto", modifier = m()) { close(); Nav.rate = item }
+                PillButton(if (Store.isDisliked(item)) "Togli \"Non mi piace\"" else "Non mi piace", modifier = m()) {
+                    Store.toggleDisliked(item); close()
+                }
+                if (Store.isAbandoned(item)) {
+                    PillButton("Togli da Abbandonati", modifier = m()) { Store.clearNotInterested(item); close() }
+                } else if (WatchProgress.isInProgress(item.tmdbID) || Store.inWatchlist(item)) {
+                    PillButton("Abbandona", modifier = m()) { Store.markAbandoned(item); close() }
                 }
                 if (item.mediaType == "movie") {
                     val watched = WatchProgress.isWatched(item.tmdbID, "movie")

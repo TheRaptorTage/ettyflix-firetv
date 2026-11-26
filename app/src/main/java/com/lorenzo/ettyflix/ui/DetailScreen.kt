@@ -197,6 +197,7 @@ fun DetailScreen(start: MediaItem) {
                             PillButton(if (pos != null) "Riprendi" else "Riproduci", Icons.Filled.PlayArrow, Modifier.focusRequester(playFocus), primary = true) { playMovie() }
                         }
                         PillButton(icon = if (Store.inWatchlist(item)) Icons.Filled.Check else Icons.Filled.Add) { Store.toggleWatchlist(item) }
+                        RatingPill(item)
                         detail?.trailerKey?.let { key ->
                             PillButton("Trailer", Icons.Filled.Movie) { openTrailer(ctx, key) }
                         }
@@ -312,7 +313,8 @@ private fun EpisodeCard(show: MediaItem, ep: Episode, future: Boolean, onClick: 
         }
         Spacer(Modifier.height(8.dp))
         Text(ep.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        val sub = listOfNotNull(ep.runtime?.let { "$it min" }, ep.airDate.ifEmpty { null }?.let { shortDate(it) }).joinToString(" · ")
+        val sub = listOfNotNull(ep.runtime?.let { "$it min" }, ep.airDate.ifEmpty { null }?.let { shortDate(it) },
+            ep.rating.takeIf { it > 0 }?.let { "★ " + String.format(Locale.ITALIAN, "%.1f", it) }).joinToString(" · ")
         Text(sub, color = C.faint, fontSize = 11.sp, maxLines = 1)
         if (ep.overview.isNotEmpty()) Text(ep.overview, color = C.faint, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }

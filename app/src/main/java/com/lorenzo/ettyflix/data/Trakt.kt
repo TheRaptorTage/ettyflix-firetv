@@ -92,17 +92,60 @@ object Trakt {
         status = "Disconnesso da Trakt."
     }
 
-    private suspend fun send(path: String, method: String = "GET", body: Any? = null, auth: Boolean = false, host: String? = null): HttpResult {
+    private suspend fun send(path: String, method: String = "GET", body: Any? = null, auth: Boolean = false, host: String? = null,
+                             timeoutSec: Long = 0): HttpResult {
         val h = mutableMapOf("Content-Type" to "application/json", "trakt-api-version" to "2", "trakt-api-key" to clientID)
         if (auth) accessToken?.let { h["Authorization"] = "Bearer $it" }
-        return Http.request((host ?: base) + path, method, body?.toString(), h)
+        return Http.request((host ?: base) + path, method, body?.toString(), h, timeoutSec)
     }
 
-    private suspend fun json(path: String, auth: Boolean = false): Any? {
+    private suspend fun json(path: String, auth: Boolean = false, timeoutSec: Long = 0): Any? {
         if (auth) ensureFreshToken()
-        val r = send(path, auth = auth)
+        val r = send(path, auth = auth, timeoutSec = timeoutSec)
         if (!r.ok) return null
         return runCatching { if (r.body.trimStart().startsWith("[")) JSONArray(r.body) else JSONObject(r.body) }.getOrNull()
+    }
+
+    /** Per le liste grosse (tutte le serie viste, che Trakt manda lentamente sugli account pieni):
+     *  attesa lunga e fino a 3 tentativi. Prima andavano in timeout e si perdevano le spunte "Visto". */
+    private suspend fun jsonPatient(path: String): Any? {
+        for (attempt in 0 until 3) {
+            json(path, auth = true, timeoutSec = 120)?.let { return it }
+            kotlinx.coroutines.delay((2 + attempt * 3) * 1000L)
+        }
+        return null
+    }
+
+    /** Ricostruisce film e serie viste (stesso formato di /sync/watched) dalla cronologia completa. */
+    private fun watchedFromHistory(items: List<JSONObject>): Pair<JSONArray, JSONArray> {
+        val movies = LinkedHashMap<Int, JSONObject>()
+        val shows = LinkedHashMap<Int, Pair<JSONObject, HashMap<Int, HashMap<Int, String>>>>()
+        for (h in items) {
+            val at = h.str("watched_at") ?: ""
+            if (h.str("type") == "movie") {
+                val m = h.obj("movie"); val id = m.obj("ids").int("tmdb") ?: continue
+                val cur = movies[id]
+                if (cur == null || (cur.str("last_watched_at") ?: "") < at) movies[id] = JSONObject().put("movie", m).put("last_watched_at", at)
+            } else if (h.str("type") == "episode") {
+                val sh = h.obj("show"); val id = sh.obj("ids").int("tmdb") ?: continue
+                val sn = h.obj("episode").int("season") ?: continue
+                val en = h.obj("episode").int("number") ?: continue
+                val seasons = shows.getOrPut(id) { sh to HashMap() }.second
+                val eps = seasons.getOrPut(sn) { HashMap() }
+                if ((eps[en] ?: "") < at) eps[en] = at
+            }
+        }
+        val showsArr = JSONArray()
+        for ((_, pair) in shows) {
+            val seasonsArr = JSONArray()
+            for ((sn, eps) in pair.second) {
+                val epArr = JSONArray()
+                for ((en, at) in eps) epArr.put(JSONObject().put("number", en).put("last_watched_at", at))
+                seasonsArr.put(JSONObject().put("number", sn).put("episodes", epArr))
+            }
+            showsArr.put(JSONObject().put("show", pair.first).put("seasons", seasonsArr))
+        }
+        return JSONArray(movies.values.toList()) to showsArr
     }
 
     private suspend fun ensureFreshToken() {
@@ -235,10 +278,11 @@ object Trakt {
     suspend fun quickSync() {
         if (!isLoggedIn || busy) return
         // una volta per profilo dopo questo aggiornamento: sincronizzazione completa
-        val fullKey = Profiles.key("trakt_full_sync_v2")
+        // v3: rifatta dopo la correzione delle serie viste che andavano in timeout (ripristina le spunte
+        // "Visto" perse). Si segna come fatta SOLO se la sincronizzazione è riuscita tutta.
+        val fullKey = Profiles.key("trakt_full_sync_v3")
         if (!EttyFlixApp.prefs.getBoolean(fullKey, false)) {
-            syncAll()
-            EttyFlixApp.prefs.edit().putBoolean(fullKey, true).apply()
+            if (syncAll()) EttyFlixApp.prefs.edit().putBoolean(fullKey, true).apply()
             return
         }
         val la = json("/sync/last_activities", auth = true) as? JSONObject ?: return
@@ -307,8 +351,9 @@ object Trakt {
         return out
     }
 
-    suspend fun syncAll() {
-        if (!isLoggedIn || busy) return
+    /** Vero se è riuscita tutta. */
+    suspend fun syncAll(): Boolean {
+        if (!isLoggedIn || busy) return false
         busy = true
         val gen = syncGen
         val owner = Profiles.currentID
@@ -316,18 +361,33 @@ object Trakt {
         var complete = true
         try {
             status = "Trakt: scarico…"
-            // tutte le liste di Trakt insieme (in parallelo)
+            // tutte le liste di Trakt insieme (in parallelo). Film e serie viste sono le più pesanti:
+            // attesa lunga e più tentativi (prima andavano in timeout e venivano perse in silenzio).
             val all = coroutineScope {
                 listOf("/sync/last_activities", "/sync/watched/movies", "/sync/watched/shows", "/sync/playback",
                     "/sync/watchlist/movies", "/sync/watchlist/shows")
-                    .map { path -> async { json(path, auth = true) } }.awaitAll()
+                    .map { path -> async { if ("/watched/" in path) jsonPatient(path) else json(path, auth = true, timeoutSec = 60) } }.awaitAll()
             }
             val la = all[0] as? JSONObject
             val lists = all.drop(1).map { it as? JSONArray }
-            val moviesJ = lists[0]; val showsJ = lists[1]; val playbackJ = lists[2]
+            var moviesJ = lists[0]; var showsJ = lists[1]; val playbackJ = lists[2]
             val wlLists = listOf(Triple(lists[3], "movie", "movie"), Triple(lists[4], "tv", "show"))
-            if (lists.any { it == null }) complete = false
-            if (!same()) return
+            if (!same()) return false
+            // Riserva: se Trakt non ha mandato film o serie viste, le ricostruisco dalla cronologia completa
+            // (la stessa delle Statistiche). Così "Visto" e "Completati" restano coerenti.
+            var watchedOK = moviesJ != null && showsJ != null
+            if (!watchedOK) {
+                status = "Trakt: recupero la cronologia completa…"
+                val hist = fullHistory()
+                if (!same()) return false
+                if (hist != null) {
+                    val (hm, hs) = watchedFromHistory(hist)
+                    if (moviesJ == null) moviesJ = hm
+                    if (showsJ == null) showsJ = hs
+                    watchedOK = true
+                }
+            }
+            complete = watchedOK && playbackJ != null && lists[3] != null && lists[4] != null
             // quello che c'è già qui non lo richiedo a TMDB
             val local = HashMap<String, WatchEntry>()
             for (e in WatchProgress.entries.values) {
@@ -351,7 +411,7 @@ object Trakt {
             coroutineScope {
                 need.map { (t, id) -> async { sem.withPermit { "$t-$id" to TMDB.detail(t, id) } } }.awaitAll()
             }.forEach { (k, d) -> meta[k] = d }
-            if (!same()) return
+            if (!same()) return false
             fun detail(type: String, id: Int): MediaDetail? = meta["$type-$id"]
             val imported = mutableListOf<WatchEntry>()
             moviesJ?.objects()?.forEach { m ->
@@ -400,7 +460,7 @@ object Trakt {
                         dur * pct, dur, whenRef, false)
                 }
             }
-            if (!same()) return
+            if (!same()) return false
             val wl = mutableListOf<MediaItem>()
             for ((listJ, type, key) in wlLists) {
                 listJ?.objects()?.forEach { it ->
@@ -408,7 +468,7 @@ object Trakt {
                     (localWL["$type-$id"] ?: detail(type, id)?.item)?.let { m -> wl += m }
                 }
             }
-            if (!same()) return
+            if (!same()) return false
             // Una volta per profilo: dati riallineati al suo account Trakt (spariscono i titoli finiti per
             // errore nel profilo sbagliato). Solo se la sincronizzazione è riuscita tutta.
             val repairKey = Profiles.key("trakt_profile_repair_v1")
@@ -429,7 +489,9 @@ object Trakt {
                 val (o, pz) = stamps(la)
                 otherStamp = o; pausedStamp = pz
             }
-            status = "Sincronizzato: ${imported.size} elementi, ${wl.size} in watchlist."
+            status = if (complete) "Sincronizzato: ${imported.size} elementi, ${wl.size} in watchlist."
+                else "Sincronizzazione parziale (${imported.size} elementi): Trakt non ha risposto a tutto, riprovo alla prossima apertura."
+            return complete
         } finally {
             if (gen == syncGen) busy = false
         }

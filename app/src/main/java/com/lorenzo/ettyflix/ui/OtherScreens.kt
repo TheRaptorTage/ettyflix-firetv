@@ -167,8 +167,9 @@ fun RecommendedScreen(type: String) {
         AI.updateQualifiedShows()
         val seen = WatchProgress.entries.values.map { "${it.mediaType}-${it.tmdbID}" }.toSet()
         val used = HashSet<String>()
+        val skip = Store.notInterestedIDs   // niente titoli "Non mi piace"/"Abbandonato" nei consigli
         rows = AI.recentSeeds(type, 3).mapNotNull { seed ->
-            val recs = TMDB.recommendations(type, seed.tmdbID).filter { it.id !in seen && used.add(it.id) }.take(20)
+            val recs = TMDB.recommendations(type, seed.tmdbID).filter { it.id !in seen && it.id !in skip && used.add(it.id) }.take(20)
             if (recs.isEmpty()) null else seed to recs
         }
     }
@@ -314,8 +315,9 @@ fun LibraryScreen() {
     @Suppress("UNUSED_VARIABLE") val v = WatchProgress.version
     LaunchedEffect(Profiles.currentID, v) { runCatching { com.lorenzo.ettyflix.data.CompletedModel.refresh() } }
     val items = when (tab) {
-        0 -> Store.watchlist
+        0 -> Store.toWatch
         2 -> com.lorenzo.ettyflix.data.CompletedModel.items
+        3 -> Store.notInterested
         else -> WatchProgress.history.map { it.media }
     }
     PosterGrid("Libreria", items) {
@@ -323,6 +325,7 @@ fun LibraryScreen() {
             Chip("Da guardare", tab == 0) { tab = 0 }
             Chip("Visti di recente", tab == 1) { tab = 1 }
             Chip("Completati", tab == 2) { tab = 2 }
+            Chip("Non mi piace / Abbandonato", tab == 3) { tab = 3 }
         }
     }
 }

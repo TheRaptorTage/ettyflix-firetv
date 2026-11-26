@@ -48,6 +48,8 @@ object Nav {
     val stack = mutableStateListOf<Screen>(Screen.Home)
     /** titolo per cui è aperto il menu (tasto ☰) */
     var menu by mutableStateOf<MenuReq?>(null)
+    /** titolo per cui è aperta la finestra del voto */
+    var rate by mutableStateOf<MediaItem?>(null)
 
     val top: Screen get() = stack.last()
     val tab: Screen get() = stack.first()

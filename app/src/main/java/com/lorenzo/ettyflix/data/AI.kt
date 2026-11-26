@@ -101,11 +101,12 @@ object AI {
         val cacheKey = Profiles.key("ai_like_$type")
         val h = history()
         val mine = h.filter { it.type == type }
-        val signature = h.take(10).joinToString(",") { "${it.type}${it.id}" }
+        val signature = h.take(10).joinToString(",") { "${it.type}${it.id}" } +
+            "|r${Store.ratings.hashCode()}|n${Store.notInterestedIDs.hashCode()}"
         val cached = EttyFlixApp.prefs.getString(cacheKey, null)?.let {
             runCatching { AppJson.decodeFromString(AICache.serializer(), it) }.getOrNull()
         }
-        if (cached != null && cached.picks.isNotEmpty()) setPicks(type, cached.picks.filter { it.id !in seenKeys })
+        if (cached != null && cached.picks.isNotEmpty()) setPicks(type, cached.picks.filter { it.id !in seenKeys && it.id !in Store.notInterestedIDs })
         if (!force && cached != null && cached.signature == signature && System.currentTimeMillis() - cached.date < 86_400_000 && cached.picks.isNotEmpty()) return
         if (h.isEmpty()) {
             typeStatus = typeStatus + (type to "Guarda almeno il 75% di qualcosa e qui compariranno i consigli.")
@@ -122,12 +123,13 @@ object AI {
                 $all
                 ${if (wl.isEmpty()) "" else "\nNella sua watchlist ha già:\n$wl"}
                 ${if (mine.isEmpty()) "" else "\nDai più peso a: " + mine.take(8).joinToString(", ") { it.title } + "."}
+                TASTE_HINTS
 
                 Capisci i suoi gusti (generi, tono, temi) e consiglia 20 $kind che NON ha già visto e che non sono nella watchlist.
                 Preferisci titoli di buona qualità, anche meno famosi. Rispondi SOLO con un array JSON di oggetti con i campi:
                 "title" (titolo originale), "year" (numero), "type" ("$type"),
                 "reason" (in italiano, massimo 12 parole, perché potrebbe piacergli, citando se utile un titolo che ha visto).
-            """.trimIndent()
+            """.trimIndent().replace("TASTE_HINTS", tasteHints())
             val raw = ask(prompt)
             if (raw == null) {
                 if (typedPicks(type).isEmpty()) typeStatus = typeStatus + (type to "L'IA non ha risposto. Riprova più tardi.")
@@ -144,6 +146,19 @@ object AI {
         } finally {
             loadingTypes = loadingTypes - type
         }
+    }
+
+    /** Gusti espliciti: voti alti (8–10) e titoli "Non mi piace"/abbandonati (come sul Mac). */
+    private fun tasteHints(): String {
+        val titles = HashMap<String, String>()
+        for (m in Store.watchlist + Store.disliked + Store.abandoned) titles[m.id] = m.title
+        for (e in WatchProgress.entries.values) titles["${e.mediaType}-${e.tmdbID}"] = e.title
+        val loved = Store.ratings.filter { it.value >= 8 }.keys.mapNotNull { titles[it] }.distinct().take(15)
+        val dis = (Store.disliked + Store.abandoned).distinctBy { it.id }.take(20)
+        var out = ""
+        if (loved.isNotEmpty()) out += "\nTitoli che ama (voto alto): dai più peso a gusti simili:\n" + loved.joinToString("\n") { "- $it" }
+        if (dis.isNotEmpty()) out += "\nTitoli che NON gli piacciono o ha abbandonato: NON consigliare niente di simile:\n" + dis.joinToString("\n") { "- ${it.title}" }
+        return out
     }
 
     /** Ultimi titoli visti di un tipo (per "Perché hai visto…"). */
@@ -222,7 +237,7 @@ object AI {
                 o.keys().asSequence().mapNotNull { o.optJSONArray(it) }.firstOrNull()?.objects() ?: emptyList()
             }.getOrDefault(emptyList())
         }
-        val seen = seenKeys
+        val seen = seenKeys + Store.notInterestedIDs
         val found = arr.mapIndexed { i, x ->
             async {
                 val t = x.str("title") ?: return@async null
