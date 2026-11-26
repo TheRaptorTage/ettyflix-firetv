@@ -47,9 +47,9 @@ import com.lorenzo.ettyflix.data.WatchProgress
 import kotlinx.coroutines.delay
 
 /** verde tenue: si nota ma non ruba l'occhio alla copertina */
-val TasteGood = Color(0xFFB3DBB8)
+val TasteGood = Color(0xFF4DF26B)   // verde acceso: sulla TV si vede da lontano
 /** stellina del tuo voto: giallo tenue */
-val TasteMine = Color(0xFFF2D68C)
+val TasteMine = Color(0xFFFFD133)
 
 /** In alto sulla copertina: "Tuo voto 8" se l'hai votato, altrimenti "92%" (da 65% in su). */
 @Composable
@@ -57,7 +57,7 @@ fun MatchBadge(item: MediaItem, modifier: Modifier = Modifier, size: Int = 11) {
     @Suppress("UNUSED_VARIABLE") val v = TasteProfile.version
     val mine = Store.ratings[item.id]
     if (mine != null) {
-        Row(modifier.clip(RoundedCornerShape(50)).background(Color(0x8C000000)).padding(horizontal = 7.dp, vertical = 2.dp),
+        Row(modifier.clip(RoundedCornerShape(50)).background(Color(0xB8000000)).padding(horizontal = 7.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("★ ", color = TasteMine, fontSize = size.sp, fontWeight = FontWeight.Bold)
             Text("Tuo voto $mine", color = Color.White, fontSize = size.sp, fontWeight = FontWeight.Bold)
@@ -67,8 +67,8 @@ fun MatchBadge(item: MediaItem, modifier: Modifier = Modifier, size: Int = 11) {
     if (!EttyFlixApp.prefs.getBoolean("match_badge", true)) return
     // sempre visibile, anche bassa: così si capisce subito cosa non è nei tuoi gusti
     val p = TasteProfile.percent(item) ?: return
-    Text("$p%", color = if (p >= 85) TasteGood else if (p < 50) Color(0xB3FFFFFF) else Color.White, fontSize = size.sp, fontWeight = FontWeight.Bold,
-        modifier = modifier.clip(RoundedCornerShape(50)).background(Color(0x8C000000)).padding(horizontal = 7.dp, vertical = 2.dp))
+    Text("$p%", color = if (p >= 85) TasteGood else if (p < 50) Color(0xD1FFFFFF) else Color.White, fontSize = size.sp, fontWeight = FontWeight.Bold,
+        modifier = modifier.clip(RoundedCornerShape(50)).background(Color(0xB8000000)).padding(horizontal = 7.dp, vertical = 2.dp))
 }
 
 /** Scheda del titolo: "91% per te · Simile a «…», che hai votato 9" (+ il motivo dell'IA). */
@@ -145,7 +145,7 @@ fun RatingPromptDialog() {
         Column(Modifier.width(620.dp).background(C.panel, RoundedCornerShape(22.dp))
             .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(22.dp)).padding(26.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Ti è piaciuto «${ask.item.title}»?", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            Text(ask.question, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(ask.subtitle + " · il voto aiuta i consigli", color = C.dim, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(18.dp))
@@ -153,7 +153,7 @@ fun RatingPromptDialog() {
                 PillButton("Tantissimo", modifier = Modifier.focusRequester(first)) { RatingPrompt.rate(ask, 9) }
                 PillButton("Sì") { RatingPrompt.rate(ask, 7) }
                 PillButton("No") { RatingPrompt.rate(ask, 3) }
-                PillButton("Voto preciso") { RatingPrompt.rate(ask, null); Nav.rate = ask.item }
+                if (ask.season == null) PillButton("Voto preciso") { RatingPrompt.rate(ask, null); Nav.rate = ask.item }
                 PillButton("Non ora") { RatingPrompt.rate(ask, null) }
             }
         }

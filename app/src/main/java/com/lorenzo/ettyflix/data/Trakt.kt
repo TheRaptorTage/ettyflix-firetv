@@ -516,6 +516,18 @@ object Trakt {
         }
     }
 
+    /** Voto di una sola stagione (su Trakt resta separato da quello della serie). */
+    fun pushSeasonRating(m: MediaItem, season: Int, value: Int?) {
+        if (!isLoggedIn || m.mediaType != "tv") return
+        val se = JSONObject().put("number", season)
+        if (value != null) se.put("rating", value)
+        val body = JSONObject().put("shows", JSONArray().put(ids(m.tmdbID).put("seasons", JSONArray().put(se))))
+        scope.launch {
+            ensureFreshToken()
+            runCatching { send(if (value == null) "/sync/ratings/remove" else "/sync/ratings", "POST", body, auth = true) }
+        }
+    }
+
     /** Voti già dati su Trakt: riempiono quelli che mancano nell'app, così i consigli partono subito. */
     suspend fun importRatings() {
         if (!isLoggedIn) return
@@ -535,6 +547,22 @@ object Trakt {
             }
         }
         Store.mergeRatings(found, items)
+        // voti delle stagioni
+        val seJ = json("/sync/ratings/seasons", auth = true, timeoutSec = 60) as? JSONArray
+        if (seJ != null && Profiles.currentID == owner) {
+            val sFound = HashMap<String, Int>()
+            val sItems = HashMap<String, MediaItem>()
+            for (x in seJ.objects()) {
+                val o = x.obj("show")
+                val id = o.obj("ids").int("tmdb") ?: continue
+                val n = x.obj("season").int("number") ?: continue
+                val r = x.int("rating") ?: continue
+                if (n <= 0) continue
+                sFound["tv-$id-s$n"] = r
+                sItems["tv-$id"] = items["tv-$id"] ?: MediaItem(id, "tv", o.str("title") ?: "", year = o.int("year")?.toString() ?: "")
+            }
+            Store.mergeSeasonRatings(sFound, sItems)
+        }
         EttyFlixApp.prefs.edit().putBoolean(Profiles.key("trakt_ratings_import_v1"), true).apply()
     }
 

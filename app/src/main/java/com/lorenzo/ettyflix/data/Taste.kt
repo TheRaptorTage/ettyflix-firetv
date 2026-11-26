@@ -10,6 +10,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -573,13 +574,20 @@ object ForYouModel {
 
 // MARK: Voto a fine visione
 
-data class RatingAsk(val item: MediaItem, val subtitle: String, val key: String)
+/** season != null: voto di una stagione; inPlayer: mostrata sopra il player (inizio della stagione dopo) */
+data class RatingAsk(val item: MediaItem, val question: String, val subtitle: String, val key: String,
+                     val season: Int? = null, val inPlayer: Boolean = false)
 
 object RatingPrompt {
     var current by mutableStateOf<RatingAsk?>(null)
     /** fini raggiunte durante la visione (più di una se si passa all'episodio dopo) */
     private val candidates = mutableListOf<WatchEntry>()
+    /** inizi di stagione già controllati in questa sessione */
+    private val startsChecked = mutableSetOf<String>()
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
     private val askedKey get() = Profiles.key("rating_prompt_asked")
+    private val enabled get() = EttyFlixApp.prefs.getBoolean("rating_prompt", true)
+    private fun inPlayerNow() = com.lorenzo.ettyflix.ui.Nav.top is com.lorenzo.ettyflix.ui.Screen.Player
 
     /** Chiamata quando un film o un episodio arriva alla fine (90%). */
     fun finished(e: WatchEntry) {
@@ -588,11 +596,41 @@ object RatingPrompt {
         while (candidates.size > 8) candidates.removeAt(0)
     }
 
+    /** Primo episodio di una stagione (dalla 2 in su): se la stagione prima l'hai vista e non l'hai votata,
+     *  chiede subito il voto (anche se ieri hai spento sui titoli di coda). */
+    fun seasonStarted(e: WatchEntry) {
+        val s = e.season ?: return
+        if (e.mediaType != "tv" || e.episode != 1 || s < 2 || e.id in startsChecked) return
+        startsChecked += e.id
+        val prev = s - 1
+        val sawPrev = WatchProgress.entries.values.any { it.tmdbID == e.tmdbID && it.mediaType == "tv" && it.season == prev && it.finished }
+        if (!sawPrev || !enabled) return
+        candidates.removeAll { it.tmdbID == e.tmdbID && it.season == prev }
+        scope.launch {
+            delay(4000)
+            if (!inPlayerNow()) return@launch
+            present(e.media, prev, "Stai iniziando la stagione $s", inPlayer = true)
+        }
+    }
+
     /** Chiamata quando il player si chiude: se hai finito un film o una stagione, chiede il voto. */
     suspend fun playerClosed() {
         val pending = candidates.toList()
         candidates.clear()
-        if (!EttyFlixApp.prefs.getBoolean("rating_prompt", true)) return
+        if (!enabled) return
+        // domanda fatta nel player e rimasta senza risposta: la ripropongo nell'app
+        current?.let { a ->
+            if (a.inPlayer) {
+                current = null
+                delay(1200)
+                if (inPlayerNow() || current != null) return
+                val again = a.copy(inPlayer = false)
+                current = again
+                delay(45_000)
+                if (current == again) current = null
+                return
+            }
+        }
         // il più recente prima: se con "Guarda ora" sei passato alla stagione dopo, la fine stagione resta in lista
         for (e in pending.asReversed()) if (ask(e)) return
     }
@@ -600,10 +638,7 @@ object RatingPrompt {
     /** true se ha mostrato la domanda */
     private suspend fun ask(e: WatchEntry): Boolean {
         val item = e.media
-        if (Store.ratings.containsKey(item.id) || Store.isNotInterested(item)) return false
-        val asked = (EttyFlixApp.prefs.getString(askedKey, "") ?: "").split("\n").filter { it.isNotBlank() }
-        var key = item.id
-        var subtitle = "Hai finito il film"
+        if (Store.isNotInterested(item)) return false
         if (e.mediaType == "tv") {
             val s = e.season ?: return false
             val n = e.episode ?: return false
@@ -613,14 +648,26 @@ object RatingPrompt {
             val last = j.obj("last_episode_to_air")
             val lastAired = last.int("season_number") == s && last.int("episode_number") == n
             if (!((count > 0 && n >= count) || lastAired)) return false
-            key = "${item.id}-s$s"
-            subtitle = "Hai finito la stagione $s"
+            return present(item, s, "Hai finito la stagione $s", inPlayer = false, requeue = e)
         }
-        if (key in asked) return false
-        delay(1200)
-        if (com.lorenzo.ettyflix.ui.Nav.top is com.lorenzo.ettyflix.ui.Screen.Player) { finished(e); return true }   // il player è ripartito: aspetta la prossima chiusura
+        return present(item, null, "Hai finito il film", inPlayer = false, requeue = e)
+    }
+
+    /** Mostra la domanda (una volta sola per film o stagione). true se l'ha mostrata o rimandata. */
+    private suspend fun present(item: MediaItem, season: Int?, subtitle: String, inPlayer: Boolean, requeue: WatchEntry? = null): Boolean {
+        val key = if (season != null) Store.seasonKey(item, season) else item.id
+        if (season != null) { if (Store.seasonRating(item, season) != 0) return false }
+        else if (Store.ratings.containsKey(item.id)) return false
+        val asked = (EttyFlixApp.prefs.getString(askedKey, "") ?: "").split("\n").filter { it.isNotBlank() }
+        if (key in asked || current != null) return false
+        if (!inPlayer) {
+            delay(1200)
+            // il player è ripartito (es. episodio successivo): la domanda aspetta la prossima chiusura
+            if (inPlayerNow()) { requeue?.let { finished(it) }; return true }
+        }
         EttyFlixApp.prefs.edit().putString(askedKey, (asked + key).takeLast(500).joinToString("\n")).apply()
-        val ask = RatingAsk(item, subtitle, key)
+        val question = if (season != null) "Ti è piaciuta la stagione $season di «${item.title}»?" else "Ti è piaciuto «${item.title}»?"
+        val ask = RatingAsk(item, question, subtitle, key, season, inPlayer)
         current = ask
         delay(45_000)
         if (current == ask) current = null   // se non rispondi sparisce da solo (non te lo richiede)
@@ -628,7 +675,9 @@ object RatingPrompt {
     }
 
     fun rate(ask: RatingAsk, value: Int?) {
-        if (value != null) Store.setRating(ask.item, value)
+        if (value != null) {
+            if (ask.season != null) Store.setSeasonRating(ask.item, ask.season, value) else Store.setRating(ask.item, value)
+        }
         if (current == ask) current = null
     }
 }

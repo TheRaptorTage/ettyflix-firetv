@@ -162,7 +162,7 @@ fun AppRoot(onExit: () -> Unit) {
             }
         }
         Nav.menu?.let { MediaMenu(it) }
-        if (!Nav.top.fullScreen) RatingPromptDialog()   // "Ti è piaciuto?" dopo un film o una stagione
+        if (!Nav.top.fullScreen || com.lorenzo.ettyflix.data.RatingPrompt.current?.inPlayer == true) RatingPromptDialog()   // "Ti è piaciuto?" dopo un film o una stagione
         Nav.rate?.let { RatingDialog(it) }
         if (Idle.saver) ScreensaverScreen()
     }

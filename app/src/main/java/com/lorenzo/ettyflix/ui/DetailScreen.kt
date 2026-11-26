@@ -73,6 +73,7 @@ import com.lorenzo.ettyflix.data.WatchProgress
 import com.lorenzo.ettyflix.data.shortDate
 import com.lorenzo.ettyflix.data.todayString
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
@@ -293,7 +294,13 @@ private fun EpisodeCard(show: MediaItem, ep: Episode, future: Boolean, onClick: 
             onMenu = {
                 Nav.menu = MenuReq("E${ep.number} · ${ep.name}", null, listOf(
                     "Riproduci" to onClick,
-                    (if (watched) "Segna come non visto" else "Segna come visto") to { WatchProgress.setWatched(show, ep.season, ep, !watched) }
+                    (if (watched) "Segna come non visto" else "Segna come visto") to { WatchProgress.setWatched(show, ep.season, ep, !watched) },
+                    "Segna tutta la serie come vista" to {
+                        com.lorenzo.ettyflix.data.Trakt.scope.launch { WatchProgress.setSeries(show, true) }
+                    },
+                    (Store.seasonRating(show, ep.season).let { if (it > 0) "Voto stagione ${ep.season}: $it" else "Vota la stagione ${ep.season}" }) to {
+                        seasonRatingMenu(show, ep.season)
+                    }
                 ))
             },
             modifier = Modifier.width(250.dp).height(141.dp)
@@ -402,4 +409,14 @@ fun openTrailer(ctx: android.content.Context, key: String) {
     try { ctx.startActivity(app) } catch (e: Exception) {
         try { ctx.startActivity(web) } catch (_: Exception) {}
     }
+}
+
+
+/** Voto della stagione (1–10): il voto della serie resta il tuo; se non l'hai dato è la media delle stagioni. */
+private fun seasonRatingMenu(show: MediaItem, season: Int) {
+    val mine = Store.seasonRating(show, season)
+    val opts = mutableListOf<Pair<String, () -> Unit>>()
+    if (mine > 0) opts += "Togli il voto" to { Store.setSeasonRating(show, season, 0) }
+    for (v in 10 downTo 1) opts += (if (v == mine) "✓ $v" else "$v") to { Store.setSeasonRating(show, season, v) }
+    Nav.menu = MenuReq("Voto della stagione $season", null, opts, showOpen = false)
 }

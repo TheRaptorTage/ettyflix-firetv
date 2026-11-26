@@ -103,6 +103,8 @@ object Store {
     var abandoned by mutableStateOf(listOf<MediaItem>())
     /** titoli votati (nome e locandina), per le Statistiche "I tuoi voti" */
     var ratedItems by mutableStateOf(mapOf<String, MediaItem>())
+    /** voti delle singole stagioni: "tv-123-s4" → 1…10 (la domanda di fine stagione) */
+    var seasonRatings by mutableStateOf(mapOf<String, Int>())
 
     init {
         val text = DataDir.read("config.json") ?: EttyFlixApp.prefs.getString("config_backup", null)
@@ -120,6 +122,9 @@ object Store {
         disliked = loadList(Profiles.file("disliked.json"))
         abandoned = loadList(Profiles.file("abandoned.json"))
         ratings = DataDir.read(Profiles.file("ratings.json"))?.let { t ->
+            runCatching { val o = JSONObject(t); o.keys().asSequence().associateWith { o.getInt(it) } }.getOrNull()
+        } ?: emptyMap()
+        seasonRatings = DataDir.read(Profiles.file("season_ratings.json"))?.let { t ->
             runCatching { val o = JSONObject(t); o.keys().asSequence().associateWith { o.getInt(it) } }.getOrNull()
         } ?: emptyMap()
         ratedItems = DataDir.read(Profiles.file("rated_items.json"))?.let { t ->
@@ -211,11 +216,15 @@ object Store {
 
     fun rating(m: MediaItem): Int = ratings[m.id] ?: 0
 
-    fun setRating(m: MediaItem, value: Int) {
+    /** auto: voto della serie calcolato dalla media delle stagioni (finché non la voti tu) */
+    fun setRating(m: MediaItem, value: Int, auto: Boolean = false) {
         val r = ratings.toMutableMap()
         if (value in 1..10) r[m.id] = value else r.remove(m.id)
         ratings = r
         saveRatings()
+        val autoSet = autoSeries().toMutableSet()
+        if (auto && value in 1..10) autoSet += m.id else autoSet -= m.id
+        EttyFlixApp.prefs.edit().putString(autoSeriesKey, autoSet.joinToString("\n")).apply()
         if (value in 1..10) {
             // ricordo nome e locandina (se il titolo arriva senza, tengo quelli che avevo)
             val keep = if (m.posterPath == null) ratedItems[m.id] ?: m else m
@@ -232,6 +241,45 @@ object Store {
 
     private fun saveRatedItems() {
         DataDir.write(Profiles.file("rated_items.json"), AppJson.encodeToString(MapSerializer(String.serializer(), MediaItem.serializer()), ratedItems))
+    }
+
+    // MARK: Voti delle stagioni
+
+    private val autoSeriesKey get() = Profiles.key("series_rating_auto")
+    private fun autoSeries(): Set<String> =
+        (EttyFlixApp.prefs.getString(autoSeriesKey, "") ?: "").split("\n").filter { it.isNotBlank() }.toSet()
+    fun seasonKey(m: MediaItem, season: Int) = "${m.id}-s$season"
+    fun seasonRating(m: MediaItem, season: Int): Int = seasonRatings[seasonKey(m, season)] ?: 0
+    /** il voto della serie è la media delle stagioni? (false se l'hai votata tu) */
+    fun seriesRatingIsAuto(m: MediaItem) = m.id in autoSeries()
+
+    /** Voto di una stagione. Se la serie non l'hai votata tu, il suo voto diventa la media delle stagioni. */
+    fun setSeasonRating(m: MediaItem, season: Int, value: Int, push: Boolean = true) {
+        val k = seasonKey(m, season)
+        val r = seasonRatings.toMutableMap()
+        if (value in 1..10) r[k] = value else r.remove(k)
+        seasonRatings = r
+        val o = JSONObject(); seasonRatings.forEach { (kk, v) -> o.put(kk, v) }
+        DataDir.write(Profiles.file("season_ratings.json"), o.toString())
+        if (push) Trakt.pushSeasonRating(m, season, if (value in 1..10) value else null)
+        if (rating(m) != 0 && !seriesRatingIsAuto(m)) return
+        val mine = seasonRatings.filterKeys { it.startsWith(m.id + "-s") }.values
+        if (mine.isEmpty()) setRating(m, 0)
+        else {
+            val avg = Math.round(mine.sum().toDouble() / mine.size).toInt()
+            if (rating(m) != avg || !seriesRatingIsAuto(m)) setRating(m, avg, auto = true)
+        }
+    }
+
+    /** Voti di stagione arrivati da Trakt: riempiono quelli che mancano. */
+    fun mergeSeasonRatings(found: Map<String, Int>, items: Map<String, MediaItem>) {
+        for ((k, v) in found) {
+            if (k in seasonRatings || v !in 1..10) continue
+            val i = k.lastIndexOf("-s"); if (i < 0) continue
+            val s = k.substring(i + 2).toIntOrNull() ?: continue
+            val m = items[k.substring(0, i)] ?: continue
+            setSeasonRating(m, s, v, push = false)
+        }
     }
 
     /** Voti arrivati da Trakt: riempiono solo quelli che mancano (quelli dati nell'app restano). */
@@ -427,6 +475,8 @@ object WatchProgress {
         if (finished && !wasFinished) Trakt.pushWatched(listOf(e), true)
         // anche se era già vista (es. segnata da Trakt): alla chiusura del player chiede "Ti è piaciuto?"
         if (finished) RatingPrompt.finished(e)
+        // primo episodio di una nuova stagione: chiede il voto della stagione prima
+        if (!finished && e.episode == 1 && position < 600) RatingPrompt.seasonStarted(e)
         if (!finished) Trakt.pushProgress(e, urgent)
     }
 
