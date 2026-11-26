@@ -285,6 +285,8 @@ object Trakt {
             if (syncAll()) EttyFlixApp.prefs.edit().putBoolean(fullKey, true).apply()
             return
         }
+        // una volta per profilo: porto nell'app i voti che hai già su Trakt
+        if (!EttyFlixApp.prefs.getBoolean(Profiles.key("trakt_ratings_import_v1"), false)) runCatching { importRatings() }
         val la = json("/sync/last_activities", auth = true) as? JSONObject ?: return
         val stamp = la.str("all") ?: return
         if (stamp == syncedStamp) return
@@ -491,6 +493,7 @@ object Trakt {
             }
             status = if (complete) "Sincronizzato: ${imported.size} elementi, ${wl.size} in watchlist."
                 else "Sincronizzazione parziale (${imported.size} elementi): Trakt non ha risposto a tutto, riprovo alla prossima apertura."
+            if (complete) runCatching { importRatings() }   // voti dati su Trakt da altre app
             return complete
         } finally {
             if (gen == syncGen) busy = false
@@ -500,6 +503,40 @@ object Trakt {
     // MARK: Invio a Trakt
 
     private fun ids(id: Int) = JSONObject().put("ids", JSONObject().put("tmdb", id))
+
+    /** Voto 1–10 anche su Trakt, così resta uguale sugli altri dispositivi (null = togli il voto). */
+    fun pushRating(m: MediaItem, value: Int?) {
+        if (!isLoggedIn || (m.mediaType != "movie" && m.mediaType != "tv")) return
+        val entry = ids(m.tmdbID)
+        if (value != null) entry.put("rating", value)
+        val body = JSONObject().put(if (m.mediaType == "movie") "movies" else "shows", JSONArray().put(entry))
+        scope.launch {
+            ensureFreshToken()
+            runCatching { send(if (value == null) "/sync/ratings/remove" else "/sync/ratings", "POST", body, auth = true) }
+        }
+    }
+
+    /** Voti già dati su Trakt: riempiono quelli che mancano nell'app, così i consigli partono subito. */
+    suspend fun importRatings() {
+        if (!isLoggedIn) return
+        val owner = Profiles.currentID
+        val mJ = json("/sync/ratings/movies", auth = true, timeoutSec = 60) as? JSONArray
+        val sJ = json("/sync/ratings/shows", auth = true, timeoutSec = 60) as? JSONArray
+        if (Profiles.currentID != owner || (mJ == null && sJ == null)) return
+        val found = HashMap<String, Int>()
+        val items = HashMap<String, MediaItem>()
+        for ((arr, key, type) in listOf(Triple(mJ, "movie", "movie"), Triple(sJ, "show", "tv"))) {
+            for (x in arr?.objects() ?: emptyList()) {
+                val o = x.obj(key)
+                val id = o.obj("ids").int("tmdb") ?: continue
+                val r = x.int("rating") ?: continue
+                found["$type-$id"] = r
+                items["$type-$id"] = MediaItem(id, type, o.str("title") ?: "", year = o.int("year")?.toString() ?: "")
+            }
+        }
+        Store.mergeRatings(found, items)
+        EttyFlixApp.prefs.edit().putBoolean(Profiles.key("trakt_ratings_import_v1"), true).apply()
+    }
 
     fun pushWatched(list: List<WatchEntry>, watched: Boolean) {
         if (!isLoggedIn || list.isEmpty()) return

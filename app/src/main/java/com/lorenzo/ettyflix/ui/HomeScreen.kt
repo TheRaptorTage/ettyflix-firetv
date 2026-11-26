@@ -60,6 +60,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lorenzo.ettyflix.data.AI
+import com.lorenzo.ettyflix.data.ForYouModel
+import com.lorenzo.ettyflix.data.Profiles
+import com.lorenzo.ettyflix.data.TasteProfile
 import com.lorenzo.ettyflix.data.ContinueTarget
 import com.lorenzo.ettyflix.data.LiveTV
 import com.lorenzo.ettyflix.data.MediaItem
@@ -118,6 +121,8 @@ fun HomeScreen() {
         runCatching { AI.refreshTyped("tv") }
     }
 
+    LaunchedEffect(Profiles.currentID, TasteProfile.mine.usable, Store.hasKey) { runCatching { ForYouModel.load() } }
+
     val shelves = Store.shelves.filter { it.enabled && (it.kind == "group" || it.kind == "liveTVFavorites") }.sortedBy { it.order }
 
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp)) {
@@ -129,11 +134,15 @@ fun HomeScreen() {
         }
         // con "Lastre di vetro" (Impostazioni) ogni riga è appoggiata su una lastra
         item(key = "continue") { SlabIfAny { ContinueRow() } }
+        // venerdì, sabato e domenica: nuove puntate della settimana + film per te
+        ForYouModel.weekend?.takeIf { it.items.isNotEmpty() }?.let { w -> item(key = "weekend") { Slab { ForYouRowView(w) } } }
         shelves.firstOrNull { it.kind == "liveTVFavorites" }?.let { fav -> item(key = "fav-ch") { SlabIfAny { FavoriteChannelsRow(fav.title) } } }
         if (Store.hasKey) {
             item(key = "ai-movie") { SlabIfAny { AIRow("movie") } }
             if (topTV.isNotEmpty()) item(key = "top-tv") { Slab { Top10Row("Top 10 serie della settimana", topTV) } }
             item(key = "ai-tv") { SlabIfAny { AIRow("tv") } }
+            // righe dai tuoi gusti: perché ti è piaciuto…, gemme nascoste, in arrivo, da vedere insieme
+            ForYouModel.rows.forEach { r -> item(key = "fy-" + r.id) { Slab { ForYouRowView(r) } } }
             if (topMovies.isNotEmpty()) item(key = "top-mv") { Slab { Top10Row("Top 10 film della settimana", topMovies) } }
         }
         items(shelves.filter { it.kind != "liveTVFavorites" }, key = { "sh-" + it.id }) { sh -> Slab { TileShelf(sh) } }
@@ -315,6 +324,7 @@ private fun Top10Row(title: String, items: List<MediaItem>) {
                     Text("${i + 1}", color = Color.White.copy(alpha = 0.92f), fontSize = 64.sp, fontWeight = FontWeight.Black,
                         style = TextStyle(shadow = Shadow(Color(0xAA000000), blurRadius = 10f)),
                         modifier = Modifier.align(Alignment.TopStart).offset(x = 8.dp, y = (-8).dp))
+                    MatchBadge(m, Modifier.align(Alignment.TopEnd).padding(6.dp), 10)   // a destra: a sinistra c'è il numero
                     // genere e voto (il voto IMDb se c'è, altrimenti quello di TMDB)
                     var rating by remember(m.id) { mutableStateOf(com.lorenzo.ettyflix.data.Ratings.cached(m) ?: m.rating) }
                     LaunchedEffect(m.id) { runCatching { com.lorenzo.ettyflix.data.Ratings.imdbRating(m) }.getOrNull()?.let { rating = it } }

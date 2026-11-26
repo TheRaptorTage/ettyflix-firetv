@@ -208,6 +208,8 @@ fun StatsScreen() {
                 }
             }
         }
+        // i tuoi voti: media, come voti, i generi che voti meglio, i più amati, le delusioni
+        item { MyRatingsPanel() }
         if (s.topSeries.isNotEmpty()) item {
             MediaRow("Serie più guardate") { items(s.topSeries, key = { it.id }) { t -> StatPoster(t, "tv", if (t.count == 1) "1 episodio" else "${t.count} episodi") } }
         }

@@ -315,7 +315,7 @@ fun LibraryScreen() {
     @Suppress("UNUSED_VARIABLE") val v = WatchProgress.version
     LaunchedEffect(Profiles.currentID, v) { runCatching { com.lorenzo.ettyflix.data.CompletedModel.refresh() } }
     val items = when (tab) {
-        0 -> Store.toWatch
+        0 -> com.lorenzo.ettyflix.data.TasteProfile.sortedForYou(Store.toWatch)   // prima quelli che ti piaceranno di più
         2 -> com.lorenzo.ettyflix.data.CompletedModel.items
         3 -> Store.notInterested
         else -> WatchProgress.history.map { it.media }
@@ -445,6 +445,21 @@ fun SettingsScreen() {
                 }
                 Spacer(Modifier.height(14.dp))
                 PillButton("Guarda di nuovo l'animazione") { Look.replay++ }
+            }
+        }
+        item {
+            Section("Consigli in base ai tuoi gusti") {
+                val p = EttyFlixApp.prefs
+                var badge by remember { mutableStateOf(p.getBoolean("match_badge", true)) }
+                var prompt by remember { mutableStateOf(p.getBoolean("rating_prompt", true)) }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PillButton((if (badge) "✓ " else "") + "Percentuale «per te» sulle copertine", primary = badge) {
+                        badge = !badge; p.edit().putBoolean("match_badge", badge).apply(); com.lorenzo.ettyflix.data.TasteProfile.featuresChanged()
+                    }
+                    PillButton((if (prompt) "✓ " else "") + "Chiedi «Ti è piaciuto?» a fine visione", primary = prompt) {
+                        prompt = !prompt; p.edit().putBoolean("rating_prompt", prompt).apply()
+                    }
+                }
             }
         }
         item {

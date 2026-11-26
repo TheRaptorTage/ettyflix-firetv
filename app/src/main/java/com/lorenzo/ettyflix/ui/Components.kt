@@ -245,6 +245,8 @@ fun PosterCard(item: MediaItem, width: Dp = 130.dp, showTitle: Boolean = false, 
                 Img(TMDBImage.url(item.posterPath, "w342"), Modifier.fillMaxSize())
                 if (item.posterPath == null) Text(item.title, color = C.dim, fontSize = 13.sp, modifier = Modifier.align(Alignment.Center).padding(8.dp))
                 if (watched) CheckBadge(Modifier.align(Alignment.TopEnd).padding(6.dp))
+                // "92%" (quanto potrebbe piacerti) oppure "Tuo voto 8"
+                MatchBadge(item, Modifier.align(Alignment.TopStart).padding(6.dp), 10)
                 if (rating > 0) Text("★ " + String.format(java.util.Locale.US, "%.1f", rating), color = Color.White, fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).clip(RoundedCornerShape(50))

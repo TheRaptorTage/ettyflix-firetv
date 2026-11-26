@@ -115,13 +115,20 @@ fun AppRoot(onExit: () -> Unit) {
                 val on = p.getBoolean("screensaver_on", true)
                 val minutes = p.getInt("screensaver_minutes", 5)
                 if (on && !Idle.saver && !Nav.top.fullScreen && Nav.menu == null && Nav.rate == null &&
+                    com.lorenzo.ettyflix.data.RatingPrompt.current == null &&
                     android.os.SystemClock.uptimeMillis() - Idle.lastKey > minutes * 60_000L &&
                     (Store.watchlist.isNotEmpty() || WatchProgress.history.isNotEmpty())) Idle.saver = true
             }
         }
+        // gusti e percentuali "per te": si aggiornano da soli
+        TasteWatcher()
+        // chiudendo il player: se hai finito un film o una stagione, chiede il voto
+        val inPlayer = top is Screen.Player
+        LaunchedEffect(inPlayer) { if (!inPlayer) runCatching { com.lorenzo.ettyflix.data.RatingPrompt.playerClosed() } }
         BackHandler {
             when {
                 Nav.rate != null -> Nav.rate = null
+                com.lorenzo.ettyflix.data.RatingPrompt.current != null -> com.lorenzo.ettyflix.data.RatingPrompt.current = null
                 Nav.menu != null -> Nav.menu = null
                 Nav.pop() -> {}
                 Nav.tab != Screen.Home -> Nav.selectTab(Screen.Home)
@@ -132,8 +139,9 @@ fun AppRoot(onExit: () -> Unit) {
         // non sul menu laterale: se la pagina non lo prende da sola, lo porto io sul primo elemento.
         val contentFocus = remember { FocusRequester() }
         var contentHasFocus by remember { mutableStateOf(false) }
-        LaunchedEffect(top, Nav.menu == null && Nav.rate == null) {
-            if (Nav.menu != null || Nav.rate != null) return@LaunchedEffect
+        val promptOpen = com.lorenzo.ettyflix.data.RatingPrompt.current != null
+        LaunchedEffect(top, Nav.menu == null && Nav.rate == null && !promptOpen) {
+            if (Nav.menu != null || Nav.rate != null || promptOpen) return@LaunchedEffect
             repeat(12) {
                 delay(90)
                 if (contentHasFocus) return@LaunchedEffect
@@ -154,6 +162,7 @@ fun AppRoot(onExit: () -> Unit) {
             }
         }
         Nav.menu?.let { MediaMenu(it) }
+        if (!Nav.top.fullScreen) RatingPromptDialog()   // "Ti è piaciuto?" dopo un film o una stagione
         Nav.rate?.let { RatingDialog(it) }
         if (Idle.saver) ScreensaverScreen()
     }
@@ -329,6 +338,14 @@ private fun MediaMenu(req: MenuReq) {
                     PillButton("Togli da Abbandonati", modifier = m()) { Store.clearNotInterested(item); close() }
                 } else if (WatchProgress.isInProgress(item.tmdbID) || Store.inWatchlist(item)) {
                     PillButton("Abbandona", modifier = m()) { Store.markAbandoned(item); close() }
+                }
+                // consigli dell'IA: "Non fa per me" con il motivo (sparisce e l'IA ne tiene conto)
+                if (com.lorenzo.ettyflix.data.AI.isPick(item.id)) {
+                    com.lorenzo.ettyflix.data.RejectReason.entries.forEach { r ->
+                        PillButton("Non fa per me: " + r.label.lowercase(), modifier = m()) {
+                            com.lorenzo.ettyflix.data.TasteProfile.reject(item, r); close()
+                        }
+                    }
                 }
                 if (item.mediaType == "movie") {
                     val watched = WatchProgress.isWatched(item.tmdbID, "movie")

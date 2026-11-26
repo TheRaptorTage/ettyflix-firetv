@@ -7,6 +7,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.lorenzo.ettyflix.EttyFlixApp
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import org.json.JSONObject
 import java.io.File
 
@@ -99,6 +101,8 @@ object Store {
     var disliked by mutableStateOf(listOf<MediaItem>())
     /** titoli abbandonati a metà */
     var abandoned by mutableStateOf(listOf<MediaItem>())
+    /** titoli votati (nome e locandina), per le Statistiche "I tuoi voti" */
+    var ratedItems by mutableStateOf(mapOf<String, MediaItem>())
 
     init {
         val text = DataDir.read("config.json") ?: EttyFlixApp.prefs.getString("config_backup", null)
@@ -117,6 +121,9 @@ object Store {
         abandoned = loadList(Profiles.file("abandoned.json"))
         ratings = DataDir.read(Profiles.file("ratings.json"))?.let { t ->
             runCatching { val o = JSONObject(t); o.keys().asSequence().associateWith { o.getInt(it) } }.getOrNull()
+        } ?: emptyMap()
+        ratedItems = DataDir.read(Profiles.file("rated_items.json"))?.let { t ->
+            runCatching { AppJson.decodeFromString(MapSerializer(String.serializer(), MediaItem.serializer()), t) }.getOrNull()
         } ?: emptyMap()
         recents = EttyFlixApp.prefs.getString(Profiles.key("recents"), "")!!.split("\n").filter { it.isNotBlank() }
     }
@@ -208,8 +215,46 @@ object Store {
         val r = ratings.toMutableMap()
         if (value in 1..10) r[m.id] = value else r.remove(m.id)
         ratings = r
-        val o = JSONObject(); r.forEach { (k, v) -> o.put(k, v) }
+        saveRatings()
+        if (value in 1..10) {
+            // ricordo nome e locandina (se il titolo arriva senza, tengo quelli che avevo)
+            val keep = if (m.posterPath == null) ratedItems[m.id] ?: m else m
+            ratedItems = ratedItems + (m.id to keep)
+            saveRatedItems()
+        }
+        Trakt.pushRating(m, if (value in 1..10) value else null)   // il voto va anche su Trakt
+    }
+
+    private fun saveRatings() {
+        val o = JSONObject(); ratings.forEach { (k, v) -> o.put(k, v) }
         DataDir.write(Profiles.file("ratings.json"), o.toString())
+    }
+
+    private fun saveRatedItems() {
+        DataDir.write(Profiles.file("rated_items.json"), AppJson.encodeToString(MapSerializer(String.serializer(), MediaItem.serializer()), ratedItems))
+    }
+
+    /** Voti arrivati da Trakt: riempiono solo quelli che mancano (quelli dati nell'app restano). */
+    fun mergeRatings(found: Map<String, Int>, items: Map<String, MediaItem>) {
+        val add = found.filter { it.key !in ratings && it.value in 1..10 }
+        if (add.isNotEmpty()) { ratings = ratings + add; saveRatings() }
+        val newItems = items.filter { it.key !in ratedItems }
+        if (newItems.isNotEmpty()) { ratedItems = ratedItems + newItems; saveRatedItems() }
+    }
+
+    /** Completa nome e locandina dei titoli votati che ne sono senza (es. voti arrivati da Trakt). */
+    suspend fun fillRatedItems() {
+        val missing = ratings.keys.filter { ratedItems[it]?.posterPath == null }.take(40)
+        if (missing.isEmpty()) return
+        val add = HashMap<String, MediaItem>()
+        for (k in missing) {
+            val type = k.substringBefore("-")
+            val id = k.substringAfter("-").toIntOrNull() ?: continue
+            val j = TMDB.get("$type/$id") ?: continue
+            val m = MediaItem.from(j, type) ?: continue
+            add[k] = m.copy(genreIDs = j.arr("genres").mapNotNull { it.int("id") })
+        }
+        if (add.isNotEmpty()) { ratedItems = ratedItems + add; saveRatedItems() }
     }
 
     fun isDisliked(m: MediaItem) = disliked.any { it.id == m.id }
@@ -361,7 +406,10 @@ object WatchProgress {
         entries[key] = e
         hiddenFromContinue = hiddenFromContinue - m.tmdbID
         save()
-        if (finished && !wasFinished) Trakt.pushWatched(listOf(e), true)
+        if (finished && !wasFinished) {
+            Trakt.pushWatched(listOf(e), true)
+            RatingPrompt.finished(e)   // alla chiusura del player chiede "Ti è piaciuto?"
+        }
         if (!finished) Trakt.pushProgress(e, urgent)
     }
 

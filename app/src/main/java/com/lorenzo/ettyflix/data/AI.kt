@@ -1,5 +1,7 @@
 package com.lorenzo.ettyflix.data
 
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -37,6 +39,28 @@ object AI {
     fun reloadProfile() { moviePicks = emptyList(); tvPicks = emptyList(); typeStatus = emptyMap(); qualifiedShows = emptySet() }
 
     fun typedPicks(type: String) = if (type == "movie") moviePicks else tvPicks
+
+    /** È uno dei consigli dell'IA? (per "Non fa per me" nel menu) */
+    fun isPick(id: String) = moviePicks.any { it.id == id } || tvPicks.any { it.id == id }
+
+    /** Titoli da non consigliare mai: Non mi piace, Abbandonati, scartati con "Non fa per me". */
+    val excludedIDs: Set<String> get() = Store.notInterestedIDs + TasteProfile.rejectedIDs
+
+    /** Toglie subito un consiglio dalle righe (e dai consigli salvati). */
+    fun removePick(id: String) {
+        moviePicks = moviePicks.filter { it.id != id }
+        tvPicks = tvPicks.filter { it.id != id }
+        for (type in listOf("movie", "tv")) {
+            val k = Profiles.key("ai_like_$type")
+            val c = EttyFlixApp.prefs.getString(k, null)?.let { runCatching { AppJson.decodeFromString(AICache.serializer(), it) }.getOrNull() } ?: continue
+            EttyFlixApp.prefs.edit().putString(k, AppJson.encodeToString(AICache.serializer(), c.copy(picks = c.picks.filter { it.id != id }))).apply()
+        }
+    }
+
+    /** tentativi automatici quando Gemini è sovraccarico (per tipo) */
+    private val retries = HashMap<String, Int>()
+    /** una richiesta a Gemini alla volta (film e serie insieme facevano rispondere "troppo richiesto") */
+    private val askLock = kotlinx.coroutines.sync.Mutex()
     private fun setPicks(type: String, p: List<AIPick>) { if (type == "movie") moviePicks = p else tvPicks = p }
 
     // MARK: Cronologia valida (almeno il 75%)
@@ -106,7 +130,7 @@ object AI {
         val cached = EttyFlixApp.prefs.getString(cacheKey, null)?.let {
             runCatching { AppJson.decodeFromString(AICache.serializer(), it) }.getOrNull()
         }
-        if (cached != null && cached.picks.isNotEmpty()) setPicks(type, cached.picks.filter { it.id !in seenKeys && it.id !in Store.notInterestedIDs })
+        if (cached != null && cached.picks.isNotEmpty()) setPicks(type, cached.picks.filter { it.id !in seenKeys && it.id !in excludedIDs })
         if (!force && cached != null && cached.signature == signature && System.currentTimeMillis() - cached.date < 86_400_000 && cached.picks.isNotEmpty()) return
         if (h.isEmpty()) {
             typeStatus = typeStatus + (type to "Guarda almeno il 75% di qualcosa e qui compariranno i consigli.")
@@ -130,11 +154,27 @@ object AI {
                 "title" (titolo originale), "year" (numero), "type" ("$type"),
                 "reason" (in italiano, massimo 12 parole, perché potrebbe piacergli, citando se utile un titolo che ha visto).
             """.trimIndent().replace("TASTE_HINTS", tasteHints())
-            val raw = ask(prompt)
+            val raw = askLock.withLock { ask(prompt) }
             if (raw == null) {
-                if (typedPicks(type).isEmpty()) typeStatus = typeStatus + (type to "L'IA non ha risposto. Riprova più tardi.")
+                if (typedPicks(type).isEmpty()) {
+                    // Gemini sovraccarico o lento: riprovo da solo dopo un po', fino a 6 volte
+                    val n = retries[type] ?: 0
+                    if (n < 6) {
+                        retries[type] = n + 1
+                        val wait = listOf(8, 15, 25, 40, 60, 90)[n]
+                        typeStatus = typeStatus + (type to "Gemini è molto richiesto: riprovo da solo tra $wait secondi…")
+                        Trakt.scope.launch {
+                            delay(wait * 1000L)
+                            if (typedPicks(type).isEmpty()) runCatching { refreshTyped(type, force = true) }
+                        }
+                    } else {
+                        retries[type] = 0
+                        typeStatus = typeStatus + (type to "Gemini non risponde da un po'. Riprova più tardi.")
+                    }
+                }
                 return
             }
+            retries[type] = 0
             val found = resolve(raw).filter { it.item.mediaType == type }
             if (found.isEmpty()) {
                 typeStatus = typeStatus + (type to "L'IA ha risposto ma non ho trovato i titoli su TMDB.")
@@ -158,6 +198,8 @@ object AI {
         var out = ""
         if (loved.isNotEmpty()) out += "\nTitoli che ama (voto alto): dai più peso a gusti simili:\n" + loved.joinToString("\n") { "- $it" }
         if (dis.isNotEmpty()) out += "\nTitoli che NON gli piacciono o ha abbandonato: NON consigliare niente di simile:\n" + dis.joinToString("\n") { "- ${it.title}" }
+        // profilo dei gusti calcolato dall'app (generi, temi, persone, epoche) + consigli scartati
+        out += TasteProfile.promptSummary()
         return out
     }
 
@@ -237,7 +279,7 @@ object AI {
                 o.keys().asSequence().mapNotNull { o.optJSONArray(it) }.firstOrNull()?.objects() ?: emptyList()
             }.getOrDefault(emptyList())
         }
-        val seen = seenKeys + Store.notInterestedIDs
+        val seen = seenKeys + excludedIDs
         val found = arr.mapIndexed { i, x ->
             async {
                 val t = x.str("title") ?: return@async null

@@ -184,6 +184,8 @@ fun DetailScreen(start: MediaItem) {
                         Spacer(Modifier.height(12.dp))
                         Text(overview, color = C.dim, fontSize = 14.sp, maxLines = 4, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
                     }
+                    // "91% per te · Simile a «…», che hai votato 9" (+ il motivo dell'IA)
+                    WhyForYouLine(item)
                     Spacer(Modifier.height(18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         val t = target
