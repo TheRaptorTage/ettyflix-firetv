@@ -116,6 +116,33 @@ object Trakt {
         return null
     }
 
+    /** Liste che Trakt ora manda A PAGINE (da luglio 2026: senza "page" arriva solo la prima, 100 elementi).
+     *  Chiede tutte le pagine e le unisce. null se una pagina non arriva (meglio niente che una lista a metà). */
+    private suspend fun jsonAllPages(path: String, limit: Int = 100, patient: Boolean = true): JSONArray? {
+        val all = JSONArray()
+        val sep = if ("?" in path) "&" else "?"
+        fun sig(x: JSONObject?): String {
+            if (x == null) return ""
+            return listOf(x.opt("id"), x.optJSONObject("movie")?.optJSONObject("ids")?.opt("trakt"),
+                x.optJSONObject("show")?.optJSONObject("ids")?.opt("trakt"),
+                x.optJSONObject("season")?.optJSONObject("ids")?.opt("trakt"),
+                x.optJSONObject("episode")?.optJSONObject("ids")?.opt("trakt")).joinToString("-")
+        }
+        var prevFirst = ""
+        for (page in 1..400) {
+            val url = "$path${sep}page=$page&limit=$limit"
+            val arr = (if (patient) jsonPatient(url) else json(url, auth = true, timeoutSec = 60)) as? JSONArray ?: return null
+            // stessa pagina di prima: Trakt ignora le pagine per questa lista (l'ho già tutta)
+            val first = sig(arr.optJSONObject(0))
+            if (page > 1 && first.isNotEmpty() && first == prevFirst) break
+            prevFirst = first
+            for (i in 0 until arr.length()) all.put(arr.get(i))
+            // pagina non piena = ultima; più lunga del limite = Trakt ha mandato tutto in una volta
+            if (arr.length() != limit) break
+        }
+        return all
+    }
+
     /** Ricostruisce film e serie viste (stesso formato di /sync/watched) dalla cronologia completa. */
     private fun watchedFromHistory(items: List<JSONObject>): Pair<JSONArray, JSONArray> {
         val movies = LinkedHashMap<Int, JSONObject>()
@@ -280,7 +307,8 @@ object Trakt {
         // una volta per profilo dopo questo aggiornamento: sincronizzazione completa
         // v3: rifatta dopo la correzione delle serie viste che andavano in timeout (ripristina le spunte
         // "Visto" perse). Si segna come fatta SOLO se la sincronizzazione è riuscita tutta.
-        val fullKey = Profiles.key("trakt_full_sync_v3")
+        // v4: Trakt ora manda le liste a pagine (prima arrivava solo la prima pagina: serie viste sparite)
+        val fullKey = Profiles.key("trakt_full_sync_v4")
         if (!EttyFlixApp.prefs.getBoolean(fullKey, false)) {
             if (syncAll()) EttyFlixApp.prefs.edit().putBoolean(fullKey, true).apply()
             return
@@ -302,7 +330,7 @@ object Trakt {
         if (!isLoggedIn || busy) return
         val gen = syncGen
         val owner = Profiles.currentID
-        val list = json("/sync/playback", auth = true) as? JSONArray ?: return
+        val list = jsonAllPages("/sync/playback", patient = false) ?: return
         val out = mutableListOf<WatchEntry>()
         list.objects().forEach { p ->
             val pct = (p.dbl("progress") ?: 0.0) / 100
@@ -343,7 +371,7 @@ object Trakt {
     suspend fun fullHistory(): List<JSONObject>? {
         if (!isLoggedIn) return null
         val out = ArrayList<JSONObject>()
-        for (page in 1..60) {
+        for (page in 1..400) {
             val arr = json("/sync/history?extended=full&limit=500&page=$page", auth = true) as? JSONArray
                 ?: return if (page == 1) null else out
             if (arr.length() == 0) break
@@ -368,25 +396,40 @@ object Trakt {
             val all = coroutineScope {
                 listOf("/sync/last_activities", "/sync/watched/movies", "/sync/watched/shows", "/sync/playback",
                     "/sync/watchlist/movies", "/sync/watchlist/shows")
-                    .map { path -> async { if ("/watched/" in path) jsonPatient(path) else json(path, auth = true, timeoutSec = 60) } }.awaitAll()
+                    .map { path -> async {
+                        when {
+                            path == "/sync/last_activities" -> json(path, auth = true, timeoutSec = 60)
+                            // Trakt ora manda queste liste a pagine: le chiedo tutte
+                            "/watched/" in path -> jsonAllPages(path)
+                            else -> jsonAllPages(path, patient = false)
+                        }
+                    } }.awaitAll()
             }
             val la = all[0] as? JSONObject
             val lists = all.drop(1).map { it as? JSONArray }
             var moviesJ = lists[0]; var showsJ = lists[1]; val playbackJ = lists[2]
             val wlLists = listOf(Triple(lists[3], "movie", "movie"), Triple(lists[4], "tv", "show"))
             if (!same()) return false
-            // Riserva: se Trakt non ha mandato film o serie viste, le ricostruisco dalla cronologia completa
-            // (la stessa delle Statistiche). Così "Visto" e "Completati" restano coerenti.
+            // serie mandate senza stagioni (nuove impostazioni predefinite di Trakt): gli episodi li prendo dalla cronologia
+            showsJ?.let { sj ->
+                if (sj.length() > 0 && sj.objects().none { (it.optJSONArray("seasons")?.length() ?: 0) > 0 }) showsJ = null
+            }
+            // Cronologia completa (la stessa delle Statistiche): se Trakt non ha mandato film o serie viste, e una volta
+            // per profilo comunque, per rimettere TUTTO quello che hai visto (anche le serie perse prima di questa correzione).
+            val historyKey = Profiles.key("trakt_history_merge_v1")
+            val historyOnce = !EttyFlixApp.prefs.getBoolean(historyKey, false)
             var watchedOK = moviesJ != null && showsJ != null
-            if (!watchedOK) {
+            var usedHistory = false
+            if (!watchedOK || historyOnce) {
                 status = "Trakt: recupero la cronologia completa…"
                 val hist = fullHistory()
                 if (!same()) return false
                 if (hist != null) {
                     val (hm, hs) = watchedFromHistory(hist)
-                    if (moviesJ == null) moviesJ = hm
-                    if (showsJ == null) showsJ = hs
+                    moviesJ = moviesJ?.let { m -> JSONArray().also { out -> for (i in 0 until m.length()) out.put(m.get(i)); for (i in 0 until hm.length()) out.put(hm.get(i)) } } ?: hm
+                    showsJ = showsJ?.let { m -> JSONArray().also { out -> for (i in 0 until m.length()) out.put(m.get(i)); for (i in 0 until hs.length()) out.put(hs.get(i)) } } ?: hs
                     watchedOK = true
+                    usedHistory = true
                 }
             }
             complete = watchedOK && playbackJ != null && lists[3] != null && lists[4] != null
@@ -493,6 +536,7 @@ object Trakt {
             }
             status = if (complete) "Sincronizzato: ${imported.size} elementi, ${wl.size} in watchlist."
                 else "Sincronizzazione parziale (${imported.size} elementi): Trakt non ha risposto a tutto, riprovo alla prossima apertura."
+            if (complete && usedHistory) EttyFlixApp.prefs.edit().putBoolean(historyKey, true).apply()
             if (complete) runCatching { importRatings() }   // voti dati su Trakt da altre app
             return complete
         } finally {
@@ -532,8 +576,8 @@ object Trakt {
     suspend fun importRatings() {
         if (!isLoggedIn) return
         val owner = Profiles.currentID
-        val mJ = json("/sync/ratings/movies", auth = true, timeoutSec = 60) as? JSONArray
-        val sJ = json("/sync/ratings/shows", auth = true, timeoutSec = 60) as? JSONArray
+        val mJ = jsonAllPages("/sync/ratings/movies", patient = false)
+        val sJ = jsonAllPages("/sync/ratings/shows", patient = false)
         if (Profiles.currentID != owner || (mJ == null && sJ == null)) return
         val found = HashMap<String, Int>()
         val items = HashMap<String, MediaItem>()
@@ -548,7 +592,7 @@ object Trakt {
         }
         Store.mergeRatings(found, items)
         // voti delle stagioni
-        val seJ = json("/sync/ratings/seasons", auth = true, timeoutSec = 60) as? JSONArray
+        val seJ = jsonAllPages("/sync/ratings/seasons", patient = false)
         if (seJ != null && Profiles.currentID == owner) {
             val sFound = HashMap<String, Int>()
             val sItems = HashMap<String, MediaItem>()
