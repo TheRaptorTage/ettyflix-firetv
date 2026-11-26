@@ -492,6 +492,8 @@ object WatchProgress {
             req.season, req.episode, req.episodeTitle, req.stillPath,
             if (finished) duration else position, duration, nowRef(), finished)
         entries[key] = e
+        // lo stai riguardando: torna in "Continua a guardare" anche sugli altri dispositivi
+        if (m.tmdbID in hiddenFromContinue && m.mediaType == "tv") Trakt.pushHidden(m.tmdbID, "tv", false)
         hiddenFromContinue = hiddenFromContinue - m.tmdbID
         save()
         if (finished && !wasFinished) Trakt.pushWatched(listOf(e), true)
@@ -579,6 +581,7 @@ object WatchProgress {
         if (tmdbID in hiddenFromContinue) return
         hiddenFromContinue = hiddenFromContinue + tmdbID
         save()
+        latest(tmdbID)?.let { Trakt.pushHidden(tmdbID, it.mediaType, true) }   // anche sugli altri dispositivi
     }
 
     fun isInProgress(tmdbID: Int) = continueWatching.any { it.tmdbID == tmdbID }
@@ -586,6 +589,22 @@ object WatchProgress {
     fun removeFromContinue(e: WatchEntry) {
         hiddenFromContinue = hiddenFromContinue + e.tmdbID
         save()
+        Trakt.pushHidden(e.tmdbID, e.mediaType, true)   // anche sugli altri dispositivi
+    }
+
+    /** Serie tolte da "Continua a guardare" su un altro dispositivo (non se qui le hai guardate negli ultimi 3 giorni). */
+    fun applyRemoteHidden(ids: Set<Int>) {
+        val recent = nowRef() - 3 * 86400
+        val add = ids.filter { id -> id !in hiddenFromContinue && (latest(id)?.updated ?: 0.0) <= recent }
+        if (add.isNotEmpty()) { hiddenFromContinue = hiddenFromContinue + add; save() }
+    }
+
+    /** Film a metà che su Trakt non hanno più la posizione (tolti altrove): via, se fermi da più di un giorno. */
+    fun hideStaleMovies(onTrakt: Set<Int>) {
+        val old = nowRef() - 86400
+        val add = entries.values.filter { it.mediaType == "movie" && !it.finished && counts(it) && it.updated < old &&
+            it.tmdbID !in onTrakt && it.tmdbID !in hiddenFromContinue }.map { it.tmdbID }.toSet()
+        if (add.isNotEmpty()) { hiddenFromContinue = hiddenFromContinue + add; save() }
     }
 }
 

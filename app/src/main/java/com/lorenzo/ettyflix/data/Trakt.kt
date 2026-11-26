@@ -143,6 +143,51 @@ object Trakt {
         return all
     }
 
+    // MARK: "Continua a guardare": titoli tolti, uguali su tutti i dispositivi
+
+    /** Togli (o rimetti) un titolo da "Continua a guardare" anche sugli altri dispositivi: le serie vanno
+     *  nell'elenco "nascoste" di Trakt; per film ed episodi a metà cancello anche la posizione su Trakt. */
+    fun pushHidden(tmdbID: Int, mediaType: String, hidden: Boolean) {
+        if (!isLoggedIn) return
+        scope.launch {
+            ensureFreshToken()
+            if (mediaType == "tv") {
+                val body = JSONObject().put("shows", JSONArray().put(ids(tmdbID)))
+                runCatching { send(if (hidden) "/users/hidden/progress_watched" else "/users/hidden/progress_watched/remove", "POST", body, auth = true) }
+            }
+            if (hidden) jsonAllPages("/sync/playback", patient = false)?.let { deletePlayback(it.objects(), setOf(tmdbID)) }
+        }
+    }
+
+    private suspend fun deletePlayback(list: List<JSONObject>, ids: Set<Int>) {
+        for (p in list) {
+            val isMovie = p.str("type") == "movie"
+            val id = (if (isMovie) p.obj("movie") else p.obj("show")).obj("ids").int("tmdb") ?: continue
+            if (id !in ids) continue
+            val pid = p.optLong("id", 0L)
+            if (pid > 0) runCatching { send("/sync/playback/$pid", "DELETE", auth = true) }
+        }
+    }
+
+    /** Dopo una sincronizzazione completa: allinea i titoli tolti da "Continua a guardare". */
+    private suspend fun syncHidden(playback: List<JSONObject>) {
+        val pushKey = Profiles.key("trakt_hidden_push_v1")
+        if (!EttyFlixApp.prefs.getBoolean(pushKey, false)) {
+            val hidden = WatchProgress.hiddenFromContinue
+            val shows = JSONArray()
+            for (id in hidden) if (WatchProgress.latest(id)?.mediaType == "tv") shows.put(ids(id))
+            if (shows.length() > 0) runCatching { send("/users/hidden/progress_watched", "POST", JSONObject().put("shows", shows), auth = true) }
+            deletePlayback(playback, hidden)
+            EttyFlixApp.prefs.edit().putBoolean(pushKey, true).apply()
+        }
+        jsonAllPages("/users/hidden/progress_watched?type=show", patient = false)?.let { h ->
+            val ids = h.objects().mapNotNull { it.obj("show").obj("ids").int("tmdb") }.toSet()
+            withContext(Dispatchers.Main) { WatchProgress.applyRemoteHidden(ids) }
+        }
+        val onTrakt = playback.filter { it.str("type") == "movie" }.mapNotNull { it.obj("movie").obj("ids").int("tmdb") }.toSet()
+        withContext(Dispatchers.Main) { WatchProgress.hideStaleMovies(onTrakt) }
+    }
+
     /** Ricostruisce film e serie viste (stesso formato di /sync/watched) dalla cronologia completa. */
     private fun watchedFromHistory(items: List<JSONObject>): Pair<JSONArray, JSONArray> {
         val movies = LinkedHashMap<Int, JSONObject>()
@@ -528,6 +573,7 @@ object Trakt {
                     Store.mergeWatchlist(wl)
                 }
             }
+            if (complete && playbackJ != null) runCatching { syncHidden(playbackJ.objects()) }
             // segno l'ultima attività solo a lavoro finito
             if (complete && la != null) {
                 la.str("all")?.let { syncedStamp = it }
