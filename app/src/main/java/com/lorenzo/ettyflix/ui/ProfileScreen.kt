@@ -119,7 +119,8 @@ private fun ProfileAvatar(p: Profile, modifier: Modifier, onClick: () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Box(Modifier.size(118.dp).background(Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color.Transparent, Color(0x14FFFFFF)))))
-            Text(p.name.take(1).uppercase(), color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Medium)
+            if (hasProfilePicture(p)) ProfilePicture(p, 118.dp)
+            else Text(p.name.take(1).uppercase(), color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Medium)
         }
         Spacer(Modifier.height(16.dp))
         // nome dentro una pillola di vetro (il testo resta normale)

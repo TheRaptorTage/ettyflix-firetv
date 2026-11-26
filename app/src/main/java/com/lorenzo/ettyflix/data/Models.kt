@@ -119,7 +119,11 @@ data class MediaDetail(
 )
 
 @Serializable
-data class Profile(val id: String, val name: String, val color: Int = 1)
+data class Profile(val id: String, val name: String, val color: Int = 1,
+                   /** immagine predefinita (stessi id del Mac), null = iniziale */
+                   val avatar: String? = null,
+                   /** foto scelta dal Mac: JPEG 256×256 in base64 */
+                   val photo: String? = null)
 
 @Serializable
 data class WatchEntry(

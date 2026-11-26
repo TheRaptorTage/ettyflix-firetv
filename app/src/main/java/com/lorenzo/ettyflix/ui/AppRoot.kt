@@ -262,8 +262,10 @@ private fun SideItem(icon: ImageVector?, label: String, expanded: Boolean, selec
             // stesso colore della scelta del profilo (segue lo sfondo scelto nelle Impostazioni)
             val t = Look.theme.avatarTint(Profiles.current)
             Box(Modifier.size(26.dp).background(Brush.linearGradient(listOf(t, t.copy(alpha = 0.7f))), CircleShape)
-                .border(1.dp, Color(0x55FFFFFF), CircleShape), contentAlignment = Alignment.Center) {
-                Text(initial, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                .border(1.dp, Color(0x55FFFFFF), CircleShape).clip(CircleShape), contentAlignment = Alignment.Center) {
+                val cur = Profiles.current
+                if (hasProfilePicture(cur)) ProfilePicture(cur, 26.dp)
+                else Text(initial, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         } else if (icon != null) {
             Icon(icon, null, tint = if (focused) Color.Black else Color.White, modifier = Modifier.size(24.dp))
