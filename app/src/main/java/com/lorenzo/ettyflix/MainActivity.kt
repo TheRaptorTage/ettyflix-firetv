@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ConfigReceiver.start()
+        AutoStart.start(this)   // si apre da sola quando accendi la TV
         setContent {
             var splash by remember { mutableStateOf(true) }
             var first by remember { mutableStateOf(true) }
@@ -40,6 +41,16 @@ class MainActivity : ComponentActivity() {
                 if (splash) EttySplash { splash = false }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AutoStart.inFront = true
+    }
+
+    override fun onPause() {
+        AutoStart.inFront = false
+        super.onPause()
     }
 
     override fun onStop() {

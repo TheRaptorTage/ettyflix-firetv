@@ -491,6 +491,20 @@ fun SettingsScreen() {
             }
         }
         item {
+            Section("Avvio automatico") {
+                var auto by remember { mutableStateOf(com.lorenzo.ettyflix.AutoStart.enabled) }
+                val ok = com.lorenzo.ettyflix.AutoStart.permitted(EttyFlixApp.ctx)
+                PillButton((if (auto) "✓ " else "") + "Apri EttyFlix quando accendi la TV", primary = auto) {
+                    auto = !auto; com.lorenzo.ettyflix.AutoStart.enabled = auto
+                }
+                Text(
+                    if (ok) "Permesso attivo: EttyFlix si apre da sola quando la Fire Stick si accende o si riavvia."
+                    else "Manca il permesso \"mostra sopra le altre app\": si dà una volta dal Mac (vedi le istruzioni che ti ho dato). " +
+                        "Senza, EttyFlix si apre da sola solo dopo un riavvio, e su alcune versioni nemmeno quello.",
+                    color = if (ok) C.dim else C.accent, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        item {
             Section("Ricevi configurazione dal Mac") {
                 Text("Sul Mac apri EttyFlix › Impostazioni › Condividi configurazione e scrivi questo codice. Mac e Fire TV devono essere sulla stessa rete.",
                     color = C.dim, fontSize = 14.sp)
