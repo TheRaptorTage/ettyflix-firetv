@@ -238,9 +238,9 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
         return duration > 1 && duration < 300 && (expected >= 15 * 60 || (expected == 0.0 && duration < 90))
     }
 
-    fun save(periodic: Boolean = false) {
+    fun save(periodic: Boolean = false, endReached: Boolean = false) {
         if (!started || looksExpired()) return
-        WatchProgress.update(req, position, duration, urgent = !periodic)
+        WatchProgress.update(req, if (endReached) maxOf(position, duration) else position, duration, urgent = !periodic)
     }
 
     fun tryNext(reason: String) {
@@ -259,7 +259,7 @@ fun PlayerScreen(req: PlayRequest, sources: List<PlayerSource>, selected: Int) {
 
     fun playNextEpisode() {
         val n = nextReady ?: return
-        save()
+        save(endReached = duration > 0 && position >= duration * 0.75)   // passi al successivo: questo è finito
         // fonti cercate molti minuti fa: i link possono essere scaduti, le cerco di nuovo
         if (System.currentTimeMillis() - nextReadyAt > 6 * 60_000) {
             note = "Cerco le fonti dell'episodio successivo…"

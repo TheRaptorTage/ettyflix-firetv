@@ -577,41 +577,54 @@ data class RatingAsk(val item: MediaItem, val subtitle: String, val key: String)
 
 object RatingPrompt {
     var current by mutableStateOf<RatingAsk?>(null)
-    private var candidate: WatchEntry? = null
+    /** fini raggiunte durante la visione (più di una se si passa all'episodio dopo) */
+    private val candidates = mutableListOf<WatchEntry>()
     private val askedKey get() = Profiles.key("rating_prompt_asked")
 
     /** Chiamata quando un film o un episodio arriva alla fine (90%). */
-    fun finished(e: WatchEntry) { candidate = e }
+    fun finished(e: WatchEntry) {
+        candidates.removeAll { it.id == e.id }
+        candidates.add(e)
+        while (candidates.size > 8) candidates.removeAt(0)
+    }
 
     /** Chiamata quando il player si chiude: se hai finito un film o una stagione, chiede il voto. */
     suspend fun playerClosed() {
-        val e = candidate ?: return
-        candidate = null
+        val pending = candidates.toList()
+        candidates.clear()
         if (!EttyFlixApp.prefs.getBoolean("rating_prompt", true)) return
+        // il più recente prima: se con "Guarda ora" sei passato alla stagione dopo, la fine stagione resta in lista
+        for (e in pending.asReversed()) if (ask(e)) return
+    }
+
+    /** true se ha mostrato la domanda */
+    private suspend fun ask(e: WatchEntry): Boolean {
         val item = e.media
-        if (Store.ratings.containsKey(item.id) || Store.isNotInterested(item)) return
+        if (Store.ratings.containsKey(item.id) || Store.isNotInterested(item)) return false
         val asked = (EttyFlixApp.prefs.getString(askedKey, "") ?: "").split("\n").filter { it.isNotBlank() }
         var key = item.id
         var subtitle = "Hai finito il film"
         if (e.mediaType == "tv") {
-            val s = e.season ?: return
-            val n = e.episode ?: return
-            if (s <= 0) return
-            val j = TMDB.get("tv/${e.tmdbID}") ?: return
+            val s = e.season ?: return false
+            val n = e.episode ?: return false
+            if (s <= 0) return false
+            val j = TMDB.get("tv/${e.tmdbID}") ?: return false
             val count = j.arr("seasons").firstOrNull { it.int("season_number") == s }?.int("episode_count") ?: 0
             val last = j.obj("last_episode_to_air")
             val lastAired = last.int("season_number") == s && last.int("episode_number") == n
-            if (!((count > 0 && n >= count) || lastAired)) return
+            if (!((count > 0 && n >= count) || lastAired)) return false
             key = "${item.id}-s$s"
             subtitle = "Hai finito la stagione $s"
         }
-        if (key in asked) return
-        EttyFlixApp.prefs.edit().putString(askedKey, (asked + key).takeLast(500).joinToString("\n")).apply()
+        if (key in asked) return false
         delay(1200)
+        if (com.lorenzo.ettyflix.ui.Nav.top is com.lorenzo.ettyflix.ui.Screen.Player) { finished(e); return true }   // il player è ripartito: aspetta la prossima chiusura
+        EttyFlixApp.prefs.edit().putString(askedKey, (asked + key).takeLast(500).joinToString("\n")).apply()
         val ask = RatingAsk(item, subtitle, key)
         current = ask
         delay(45_000)
         if (current == ask) current = null   // se non rispondi sparisce da solo (non te lo richiede)
+        return true
     }
 
     fun rate(ask: RatingAsk, value: Int?) {

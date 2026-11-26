@@ -424,10 +424,9 @@ object WatchProgress {
         entries[key] = e
         hiddenFromContinue = hiddenFromContinue - m.tmdbID
         save()
-        if (finished && !wasFinished) {
-            Trakt.pushWatched(listOf(e), true)
-            RatingPrompt.finished(e)   // alla chiusura del player chiede "Ti è piaciuto?"
-        }
+        if (finished && !wasFinished) Trakt.pushWatched(listOf(e), true)
+        // anche se era già vista (es. segnata da Trakt): alla chiusura del player chiede "Ti è piaciuto?"
+        if (finished) RatingPrompt.finished(e)
         if (!finished) Trakt.pushProgress(e, urgent)
     }
 
