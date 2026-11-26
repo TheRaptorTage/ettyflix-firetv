@@ -131,6 +131,10 @@ class TasteVector(
     val seeds: List<TasteSeed> = emptyList(),
     val seen: Set<String> = emptySet()
 ) {
+    /** taratura: punteggio medio e dispersione di ~80 titoli popolari qualsiasi (vedi TasteProfile.calibrate).
+     *  Così un titolo "nella media" vale circa 50% e solo quelli davvero nei tuoi gusti arrivano a 90%+. */
+    var baseline = 0.0
+    var spread = 0.25
     private val maxG = max(0.5, genres.values.maxOfOrNull { abs(it) } ?: 1.0)
     private val maxK = max(0.5, keywords.values.maxOfOrNull { abs(it) } ?: 1.0)
     private val maxP = max(0.5, people.values.maxOfOrNull { abs(it) } ?: 1.0)
@@ -164,7 +168,8 @@ class TasteVector(
     fun percent(item: MediaItem, f: TasteFeatures?): Int? {
         if (!usable) return null
         val r = raw(item, f) ?: return null
-        return Math.round(50 + 49 * tanh(2.2 * r)).toInt().coerceIn(1, 99)
+        val z = (r - baseline) / max(0.08, spread)
+        return Math.round(50 + 49 * tanh(0.9 * z)).toInt().coerceIn(1, 99)
     }
 
     val topGenres: List<Int> get() = genres.filter { it.value > 0 }.entries.sortedByDescending { it.value }.map { it.key }
@@ -221,8 +226,32 @@ object TasteProfile {
         val seeds = seeds(entries, Store.ratings, Store.disliked, Store.abandoned, rejections)
         TasteFeatureStore.fetch(seeds.map { it.type to it.tmdbID }, 80)
         if (Profiles.currentID != owner) return   // nel frattempo hai cambiato profilo
-        mine = TasteVector.build(seeds, entries.map { "${it.mediaType}-${it.tmdbID}" }.toSet(), TasteFeatureStore.all)
+        val built = TasteVector.build(seeds, entries.map { "${it.mediaType}-${it.tmdbID}" }.toSet(), TasteFeatureStore.all)
+        calibrate(built)
+        if (Profiles.currentID != owner) return
+        mine = built
         version++
+    }
+
+    /** titoli popolari qualsiasi, per tarare le percentuali (scaricati una volta per sessione) */
+    private var calibrationPool: List<MediaItem> = emptyList()
+
+    /** Tara le percentuali sui titoli popolari: prima quasi tutto stava tra 80 e 95%. */
+    suspend fun calibrate(v: TasteVector) {
+        if (calibrationPool.isEmpty()) {
+            val pool = ArrayList<MediaItem>()
+            for (type in listOf("movie", "tv")) runCatching {
+                pool += TMDB.items(SourceDef("discover", "Taratura", type, mapOf("sort_by" to "popularity.desc", "vote_count.gte" to "200")), 2)
+            }
+            calibrationPool = pool.take(80)
+        }
+        TasteFeatureStore.fetch(calibrationPool.map { it.mediaType to it.tmdbID }, 80)
+        val scores = calibrationPool.mapNotNull { v.raw(it, TasteFeatureStore.get(it.id)) }
+        if (scores.size < 15) return
+        val mean = scores.average()
+        val sd = sqrt(scores.sumOf { (it - mean) * (it - mean) } / scores.size)
+        v.baseline = mean
+        v.spread = max(0.08, sd)
     }
 
     fun featuresChanged() { version++ }
@@ -243,6 +272,7 @@ object TasteProfile {
         val seeds = seeds(entries, ratings, list("disliked.json"), list("abandoned.json"), rej)
         TasteFeatureStore.fetch(seeds.map { it.type to it.tmdbID }, 80)
         return TasteVector.build(seeds, entries.map { "${it.mediaType}-${it.tmdbID}" }.toSet(), TasteFeatureStore.all)
+            .also { calibrate(it) }
     }
 
     fun seeds(entries: List<WatchEntry>, ratings: Map<String, Int>, disliked: List<MediaItem>,
