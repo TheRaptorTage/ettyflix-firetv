@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -109,8 +110,23 @@ private fun ProfileAvatar(p: Profile, modifier: Modifier, onClick: () -> Unit) {
     val tint = Look.theme.avatarTint(p)   // colore in armonia con lo sfondo scelto
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier
         .clickable(interactionSource = src, indication = null, onClick = onClick)) {
+        val glow = profileGlow(p)
         Box(
-            Modifier.scale(scale).size(118.dp).clip(CircleShape)
+            Modifier.scale(scale)
+                // con una foto o un'immagine la luce intorno prende i suoi colori (cielo sopra, prato sotto…)
+                .drawBehind {
+                    if (glow != null) {
+                        val a = if (focused) 0.85f else 0.4f
+                        val r = size.minDimension * 0.85f
+                        drawCircle(Brush.radialGradient(listOf(glow.first.copy(alpha = a), Color.Transparent),
+                            center = Offset(size.width / 2, size.height * 0.3f), radius = r),
+                            radius = r, center = Offset(size.width / 2, size.height * 0.3f))
+                        drawCircle(Brush.radialGradient(listOf(glow.second.copy(alpha = a), Color.Transparent),
+                            center = Offset(size.width / 2, size.height * 0.7f), radius = r),
+                            radius = r, center = Offset(size.width / 2, size.height * 0.7f))
+                    }
+                }
+                .size(118.dp).clip(CircleShape)
                 // cerchio "di vetro" colorato
                 .background(Brush.linearGradient(listOf(tint.copy(alpha = if (focused) 0.75f else 0.55f), tint.copy(alpha = if (focused) 0.5f else 0.32f))))
                 .border(if (focused) 3.dp else 1.dp,

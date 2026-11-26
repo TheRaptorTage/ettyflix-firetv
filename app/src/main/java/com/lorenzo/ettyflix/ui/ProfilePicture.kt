@@ -62,6 +62,35 @@ private fun decode(b64: String): ImageBitmap? = photoCache.getOrPut(b64.hashCode
     }.getOrNull()
 }
 
+private val glowCache = HashMap<Int, Pair<Color, Color>?>()
+
+/** Colori della luce intorno: media della metà alta e della metà bassa dell'immagine, un po' più vivaci. */
+fun profileGlow(p: Profile): Pair<Color, Color>? {
+    val photo = p.photo
+    if (!photo.isNullOrEmpty()) {
+        return glowCache.getOrPut(photo.hashCode()) {
+            runCatching {
+                val bytes = Base64.decode(photo, Base64.DEFAULT)
+                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@runCatching null
+                val small = android.graphics.Bitmap.createScaledBitmap(bmp, 1, 2, true)
+                fun vivid(c: Int): Color {
+                    var r = android.graphics.Color.red(c) / 255f
+                    var g = android.graphics.Color.green(c) / 255f
+                    var b = android.graphics.Color.blue(c) / 255f
+                    val gray = (r + g + b) / 3
+                    r = gray + (r - gray) * 1.7f; g = gray + (g - gray) * 1.7f; b = gray + (b - gray) * 1.7f
+                    val m = maxOf(r, g, b, 0.001f)
+                    if (m < 0.6f) { r *= 0.6f / m; g *= 0.6f / m; b *= 0.6f / m }
+                    return Color(r.coerceIn(0f, 1f), g.coerceIn(0f, 1f), b.coerceIn(0f, 1f))
+                }
+                vivid(small.getPixel(0, 0)) to vivid(small.getPixel(0, 1))
+            }.getOrNull()
+        }
+    }
+    val pr = presets[p.avatar] ?: return null
+    return Color(pr.from) to Color(pr.to)
+}
+
 fun hasProfilePicture(p: Profile): Boolean = !p.photo.isNullOrEmpty() || presets.containsKey(p.avatar)
 
 /** Foto o immagine predefinita (riempie il riquadro: la forma la decide chi la usa). */
