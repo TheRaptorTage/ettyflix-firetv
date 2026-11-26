@@ -13,6 +13,8 @@ class EttyFlixApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // nomi e immagini dei profili mandati dal Mac: sempre in ascolto
+        runCatching { com.lorenzo.ettyflix.data.ConfigReceiver.startProfiles() }
     }
 
     override fun newImageLoader(): ImageLoader =

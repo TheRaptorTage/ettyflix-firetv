@@ -58,6 +58,23 @@ object Profiles {
             .putString("profile_current", currentID).apply()
     }
 
+    /** Nomi e immagini arrivati dal Mac: aggiorna quelli che ci sono, aggiunge i nuovi, non cancella niente. */
+    fun mergeLooks(incoming: List<Profile>) {
+        var l = list
+        var changed = false
+        for (p in incoming) {
+            val i = l.indexOfFirst { it.id == p.id }
+            if (i >= 0) {
+                val old = l[i]
+                if (old.name != p.name || old.avatar != p.avatar || old.photo != p.photo) {
+                    l = l.toMutableList().also { it[i] = old.copy(name = p.name, avatar = p.avatar, photo = p.photo) }
+                    changed = true
+                }
+            } else if (l.size < 6) { l = l + p; changed = true }
+        }
+        if (changed) { list = l; save() }
+    }
+
     fun replaceList(l: List<Profile>) {
         if (l.isEmpty()) return
         list = l

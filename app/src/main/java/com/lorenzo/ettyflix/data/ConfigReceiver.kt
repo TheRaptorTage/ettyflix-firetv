@@ -88,7 +88,36 @@ object ConfigReceiver {
 
     fun stop() { runCatching { server?.close() }; server = null; running = false }
 
-    private suspend fun handle(sock: Socket) {
+    /** Nomi e immagini dei profili mandati dal Mac (porta 8766): sempre in ascolto mentre l'app è aperta. */
+    private var profileServer: ServerSocket? = null
+    fun startProfiles() {
+        scope.launch {
+            synchronized(this@ConfigReceiver) {
+                if (profileServer?.isClosed == false) return@launch
+                val s = runCatching { ServerSocket().apply { reuseAddress = true; bind(java.net.InetSocketAddress(8766)) } }.getOrNull()
+                    ?: return@launch
+                profileServer = s
+                launch {
+                    while (!s.isClosed) {
+                        val c = runCatching { s.accept() }.getOrNull() ?: break
+                        launch { handle(c, profilesOnly = true) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun respondProfiles(method: String, path: String, body: String): Triple<Int, String, ByteArray> {
+        val bad = Triple(400, "application/json", "{\"ok\":false,\"error\":\"Dati non validi\"}".toByteArray())
+        if (method != "POST" || !path.startsWith("/profili")) return bad
+        val text = runCatching { JSONObject(body).str("profiles") }.getOrNull() ?: return bad
+        val list = runCatching { AppJson.decodeFromString(ListSerializer(Profile.serializer()), text) }.getOrNull()
+        if (list.isNullOrEmpty()) return bad
+        Profiles.mergeLooks(list)
+        return Triple(200, "application/json", "{\"ok\":true,\"message\":\"Profili aggiornati\"}".toByteArray())
+    }
+
+    private suspend fun handle(sock: Socket, profilesOnly: Boolean = false) {
         sock.use { c ->
             c.soTimeout = 20_000
             val input = c.getInputStream()
@@ -123,7 +152,9 @@ object ConfigReceiver {
             }
             if (headerEnd < 0) return
             val body = buf.toByteArray().copyOfRange(headerEnd, minOf(buf.size(), headerEnd + length))
-            val (codeOut, type, out) = withContext(Dispatchers.Main) { respond(method, path, String(body)) }
+            val (codeOut, type, out) = withContext(Dispatchers.Main) {
+                if (profilesOnly) respondProfiles(method, path, String(body)) else respond(method, path, String(body))
+            }
             val head = "HTTP/1.1 $codeOut ${if (codeOut == 200) "OK" else "Error"}\r\nContent-Type: $type\r\n" +
                 "Content-Length: ${out.size}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
             runCatching { c.getOutputStream().apply { write(head.toByteArray()); write(out); flush() } }
