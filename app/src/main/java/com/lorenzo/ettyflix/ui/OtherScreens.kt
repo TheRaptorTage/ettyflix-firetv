@@ -418,6 +418,8 @@ fun SettingsScreen() {
     LaunchedEffect(Unit) { ConfigReceiver.start() }
     LazyColumn(contentPadding = PaddingValues(horizontal = C.pad, vertical = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { Text("Impostazioni", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
+        // versione: per capire subito se l'app è aggiornata
+        item { Text(appVersionLabel(), color = C.dim, fontSize = 14.sp) }
         item {
             Section("Aspetto (apertura e profili)") {
                 Text("Colori dello sfondo", color = C.dim, fontSize = 14.sp)
@@ -586,3 +588,12 @@ private fun Line(label: String, value: String) {
         Text(value, color = C.dim, fontSize = 14.sp)
     }
 }
+
+
+/** "Versione 1.0.57 · aggiornata il 26 novembre 2026 alle 22:40" (numero = compilazione su GitHub). */
+fun appVersionLabel(): String = runCatching {
+    val ctx = com.lorenzo.ettyflix.EttyFlixApp.ctx
+    val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+    val f = java.text.SimpleDateFormat("d MMMM yyyy 'alle' HH:mm", java.util.Locale.ITALIAN)
+    "Versione ${pi.versionName} · aggiornata il ${f.format(java.util.Date(pi.lastUpdateTime))}"
+}.getOrDefault("Versione sconosciuta")
