@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -410,47 +411,123 @@ private fun ChannelRow(c: LiveChannel) {
 
 // MARK: Impostazioni
 
+/** Categorie delle Impostazioni (a sinistra): spostandoti con il telecomando a destra compare la loro pagina. */
+private data class SettingsCat(val id: String, val title: String, val subtitle: () -> String, val group: String)
+
+private val settingsCats = listOf(
+    SettingsCat("profili", "Profili", { "Profilo attivo: ${Profiles.current.name}" }, "Generale"),
+    SettingsCat("apertura", "Apertura", { "Colori, effetto di luce, suono d'avvio" }, "Aspetto"),
+    SettingsCat("home", "Home e pagine", { "Righe di vetro e sfondi" }, "Aspetto"),
+    SettingsCat("decorazioni", "Decorazioni del periodo", { Decor.seasonal.title }, "Aspetto"),
+    SettingsCat("consigli", "Consigli e voti", { "«Per te» e «Ti è piaciuto?»" }, "Visione"),
+    SettingsCat("trakt", "Trakt", { if (Trakt.isLoggedIn) "Collegato" else "Non collegato" }, "Account e fonti"),
+    SettingsCat("fonti", "Fonti e server", { if (TMDB.hasKey) "Chiavi e media server" else "Chiave TMDB mancante" }, "Account e fonti"),
+    SettingsCat("tv", "TV in diretta", { LiveTV.provider?.let { "${LiveTV.channels.size} canali" } ?: "Nessuna playlist" }, "Account e fonti"),
+    SettingsCat("ricevi", "Ricevi configurazione", { "Codice da scrivere sul Mac" }, "Dispositivo e privacy"),
+    SettingsCat("avvio", "Avvio automatico", { if (com.lorenzo.ettyflix.AutoStart.enabled) "Attivo" else "Disattivato" }, "Dispositivo e privacy"),
+    SettingsCat("privacy", "Privacy", { if (PrivacyBlur.on) "Nomi delle fonti sfocati" else "Sfocatura disattivata" }, "Dispositivo e privacy"),
+)
+
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun SettingsScreen() {
+    var page by rememberSaveable { mutableStateOf("profili") }
+    LaunchedEffect(Unit) { ConfigReceiver.start() }
+    Row(Modifier.fillMaxSize().padding(horizontal = C.pad, vertical = 28.dp)) {
+        // elenco delle categorie
+        // tornando a sinistra il cursore va sulla categoria aperta, non su quella alla stessa altezza
+        LazyColumn(Modifier.width(320.dp).fillMaxHeight().focusRestorer(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            item { Text("Impostazioni", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
+            // versione: per capire subito se l'app è aggiornata
+            item { Text(appVersionLabel(), color = C.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)) }
+            settingsCats.forEachIndexed { i, c ->
+                if (i == 0 || settingsCats[i - 1].group != c.group) item {
+                    Text(c.group.uppercase(), color = C.faint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.sp, modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp))
+                }
+                item(key = c.id) { CategoryRow(c.title, c.subtitle(), page == c.id) { page = c.id } }
+            }
+        }
+        Spacer(Modifier.width(28.dp))
+        // pagina della categoria scelta
+        LazyColumn(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = PaddingValues(top = 40.dp, bottom = 40.dp)) {
+            item(key = "titolo-$page") {
+                Text(settingsCats.firstOrNull { it.id == page }?.title ?: "", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+            item(key = "pagina-$page") { SettingsPage(page) }
+        }
+    }
+}
+
+@Composable
+private fun CategoryRow(title: String, subtitle: String, selected: Boolean, onSelect: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val f by src.collectIsFocusedAsState()
+    LaunchedEffect(f) { if (f) onSelect() }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+        .background(when { f -> Color.White; selected -> Color(0x33FFFFFF); else -> Color.Transparent })
+        .clickable(interactionSource = src, indication = null) { onSelect() }
+        .padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text(title, color = if (f) Color.Black else Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(subtitle, color = if (f) Color(0xFF444444) else C.dim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Contenuto di una categoria. */
+@Composable
+private fun SettingsPage(page: String) {
     val scope = rememberCoroutineScope()
     var serverStatus by remember { mutableStateOf("") }
     var renaming by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { ConfigReceiver.start() }
-    LazyColumn(contentPadding = PaddingValues(horizontal = C.pad, vertical = 28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { Text("Impostazioni", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
-        // versione: per capire subito se l'app è aggiornata
-        item { Text(appVersionLabel(), color = C.dim, fontSize = 14.sp) }
-        item {
-            Section("Aspetto (apertura e profili)") {
-                Text("Colori dello sfondo", color = C.dim, fontSize = 14.sp)
-                Spacer(Modifier.height(8.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        when (page) {
+            "profili" -> Section("Profili") {
+                Text("Profilo attivo: ${Profiles.current.name}", color = C.dim, fontSize = 14.sp)
+                Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AuroraTheme.entries.forEach { t ->
-                        PillButton((if (Look.theme == t) "✓ " else "") + t.title, primary = Look.theme == t) { Look.chooseTheme(t) }
-                    }
+                    PillButton("Cambia profilo") { Profiles.chosen = false }
+                    PillButton("Aggiungi profilo") { renaming = true }
                 }
-                Spacer(Modifier.height(14.dp))
-                Text("Effetto di luce dell'apertura", color = C.dim, fontSize = 14.sp)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SplashShine.entries.forEach { sh ->
-                        PillButton((if (Look.shine == sh) "✓ " else "") + sh.title, primary = Look.shine == sh) { Look.chooseShine(sh) }
-                    }
+                Text("Nomi e immagini dei profili arrivano dal Mac.", color = C.faint, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+            }
+            "apertura" -> Section("Apertura e scelta del profilo") {
+                Choices("Colori dello sfondo", AuroraTheme.entries.map { it.id to it.title }, Look.theme.id) { id ->
+                    AuroraTheme.entries.firstOrNull { it.id == id }?.let { Look.chooseTheme(it) }
                 }
-                Spacer(Modifier.height(14.dp))
-                Text("Suono d'avvio", color = C.dim, fontSize = 14.sp)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StartupSoundStyle.entries.forEach { so ->
-                        PillButton((if (Look.sound == so) "✓ " else "") + so.title, primary = Look.sound == so) { Look.chooseSound(so) }
-                    }
+                Choices("Effetto di luce dell'apertura", SplashShine.entries.map { it.name to it.title }, Look.shine.name) { id ->
+                    SplashShine.entries.firstOrNull { it.name == id }?.let { Look.chooseShine(it) }
                 }
-                Spacer(Modifier.height(14.dp))
+                Choices("Suono d'avvio", StartupSoundStyle.entries.map { it.name to it.title }, Look.sound.name) { id ->
+                    StartupSoundStyle.entries.firstOrNull { it.name == id }?.let { Look.chooseSound(it) }
+                }
                 PillButton("Guarda di nuovo l'animazione") { Look.replay++ }
             }
-        }
-        item {
-            Section("Consigli in base ai tuoi gusti") {
+            "home" -> {
+                Section("Righe della Home") {
+                    Choices("Aspetto delle righe", listOf("off" to "Classico", "lastre" to "Lastre di vetro"), Decor.homeGlass) { Decor.chooseHomeGlass(it) }
+                    Choices("Sfondo dentro le lastre", listOf("grigio" to "Nessuno", "aurora1" to "Colori appena percettibili",
+                        "aurora2" to "Colori tenui", "aurora3" to "Colori un po' più visibili"), Decor.slabBG) { Decor.chooseSlabBG(it) }
+                }
+                Section("Sfondo delle pagine") {
+                    Choices("Sfondo", listOf("grigio" to "Grigio", "vetro" to "Vetro scuro"), Decor.pageBG) { Decor.choosePageBG(it) }
+                    Choices("Colori", listOf("uguale" to "Uguale all'apertura") + AuroraTheme.entries.map { it.id to it.title },
+                        Decor.pageTheme) { Decor.choosePageTheme(it) }
+                }
+            }
+            "decorazioni" -> {
+                Section("Decorazioni del periodo (nel menu laterale)") {
+                    Choices("Decorazioni", SeasonalTheme.entries.map { it.id to it.title }, Decor.seasonal.id) { id ->
+                        SeasonalTheme.entries.firstOrNull { it.id == id }?.let { Decor.chooseSeasonal(it) }
+                    }
+                }
+                Section("Natale") {
+                    Choices("Tipo di neve", listOf("neve" to "Neve", "fiocchi" to "Fiocchi", "misto" to "Misto"), Decor.snowStyle) { Decor.chooseSnowStyle(it) }
+                    Choices("Quanto si vede", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowLevel}") { Decor.chooseSnowLevel(it.toInt()) }
+                    Choices("Quantità", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowAmount}") { Decor.chooseSnowAmount(it.toInt()) }
+                }
+            }
+            "consigli" -> Section("Consigli in base ai tuoi gusti") {
                 val p = EttyFlixApp.prefs
                 var badge by remember { mutableStateOf(p.getBoolean("match_badge", true)) }
                 var prompt by remember { mutableStateOf(p.getBoolean("rating_prompt", true)) }
@@ -463,70 +540,7 @@ fun SettingsScreen() {
                     }
                 }
             }
-        }
-        item {
-            Section("Privacy") {
-                PillButton((if (PrivacyBlur.on) "✓ " else "") + "Sfoca i nomi delle fonti e degli addon", primary = PrivacyBlur.on) {
-                    PrivacyBlur.set(!PrivacyBlur.on)
-                }
-                Text("Per fare foto o video da mandare ad altri: i nomi restano al loro posto ma non si leggono.",
-                    color = C.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-            }
-        }
-        item {
-            Section("Decorazioni e vetro") {
-                @Composable fun choices(label: String, list: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
-                    Text(label, color = C.dim, fontSize = 14.sp)
-                    Spacer(Modifier.height(8.dp))
-                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(vertical = 4.dp)) {
-                        items(list.size) { i ->
-                            val (id, title) = list[i]
-                            PillButton((if (current == id) "✓ " else "") + title, primary = current == id) { pick(id) }
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                }
-                choices("Decorazioni del periodo (nel menu laterale)", SeasonalTheme.entries.map { it.id to it.title }, Decor.seasonal.id) { id ->
-                    SeasonalTheme.entries.firstOrNull { it.id == id }?.let { Decor.chooseSeasonal(it) }
-                }
-                choices("Natale: tipo di neve", listOf("neve" to "Neve", "fiocchi" to "Fiocchi", "misto" to "Misto"), Decor.snowStyle) { Decor.chooseSnowStyle(it) }
-                choices("Natale: quanto si vede", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowLevel}") { Decor.chooseSnowLevel(it.toInt()) }
-                choices("Natale: quantità", (1..5).map { "$it" to "Livello $it" }, "${Decor.snowAmount}") { Decor.chooseSnowAmount(it.toInt()) }
-                choices("Aspetto delle righe della Home", listOf("off" to "Classico", "lastre" to "Lastre di vetro"), Decor.homeGlass) { Decor.chooseHomeGlass(it) }
-                choices("Sfondo dentro le lastre", listOf("grigio" to "Nessuno", "aurora1" to "Colori appena percettibili",
-                    "aurora2" to "Colori tenui", "aurora3" to "Colori un po' più visibili"), Decor.slabBG) { Decor.chooseSlabBG(it) }
-                choices("Sfondo delle pagine", listOf("grigio" to "Grigio", "vetro" to "Vetro scuro"), Decor.pageBG) { Decor.choosePageBG(it) }
-                choices("Colori dello sfondo delle pagine", listOf("uguale" to "Uguale all'apertura") + AuroraTheme.entries.map { it.id to it.title },
-                    Decor.pageTheme) { Decor.choosePageTheme(it) }
-            }
-        }
-        item {
-            Section("Avvio automatico") {
-                var auto by remember { mutableStateOf(com.lorenzo.ettyflix.AutoStart.enabled) }
-                val ok = com.lorenzo.ettyflix.AutoStart.permitted(EttyFlixApp.ctx)
-                PillButton((if (auto) "✓ " else "") + "Apri EttyFlix quando accendi la TV", primary = auto) {
-                    auto = !auto; com.lorenzo.ettyflix.AutoStart.enabled = auto
-                }
-                Text(
-                    if (ok) "Permesso attivo: EttyFlix si apre da sola quando la Fire Stick si accende o si riavvia."
-                    else "Manca il permesso \"mostra sopra le altre app\": si dà una volta dal Mac (vedi le istruzioni che ti ho dato). " +
-                        "Senza, EttyFlix si apre da sola solo dopo un riavvio, e su alcune versioni nemmeno quello.",
-                    color = if (ok) C.dim else C.accent, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
-            }
-        }
-        item {
-            Section("Ricevi configurazione dal Mac") {
-                Text("Sul Mac apri EttyFlix › Impostazioni › Condividi configurazione e scrivi questo codice. Mac e Fire TV devono essere sulla stessa rete.",
-                    color = C.dim, fontSize = 14.sp)
-                Spacer(Modifier.height(12.dp))
-                Text(ConfigReceiver.code, color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
-                Text(ConfigReceiver.address, color = C.faint, fontSize = 13.sp)
-                if (ConfigReceiver.message.isNotEmpty()) Text(ConfigReceiver.message, color = C.accent, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
-            }
-        }
-        item {
-            Section("Trakt (profilo ${Profiles.current.name})") {
+            "trakt" -> Section("Trakt (profilo ${Profiles.current.name})") {
                 when {
                     Trakt.isLoggedIn -> {
                         Text("Collegato" + (Trakt.username?.let { " come $it" } ?: "") + ".", color = C.dim, fontSize = 14.sp)
@@ -545,40 +559,74 @@ fun SettingsScreen() {
                 }
                 if (Trakt.status.isNotEmpty()) Text(Trakt.status, color = C.faint, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
             }
-        }
-        item {
-            Section("Stato") {
-                Line("TMDB", if (TMDB.hasKey) "Chiave presente" else "Chiave mancante: inviala dal Mac")
-                Line("IA (Gemini)", if (AI.hasKey) "Chiave presente" else "Nessuna chiave")
-                Line("OMDb", if (EttyFlixApp.prefs.getString("omdb_api_key", "").isNullOrEmpty()) "Nessuna chiave" else "Chiave presente")
-                Line("Media server", Store.server?.let { "${it.name} · ${it.url.substringAfter("://").substringBefore("/")}" } ?: "Nessun server", blur = true)
-                Line("TV in diretta", LiveTV.provider?.let { "${it.name} · ${LiveTV.channels.size} canali · guida per ${LiveTV.guide.size} canali" } ?: "Nessuna playlist")
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (Store.server != null) PillButton("Verifica server") { scope.launch { serverStatus = "Verifico…"; serverStatus = Jellyfin.check() } }
-                    if (LiveTV.provider != null) PillButton(if (LiveTV.loading) "Aggiorno…" else "Aggiorna canali e guida") { scope.launch { LiveTV.refresh() } }
+            "fonti" -> {
+                Section("Chiavi") {
+                    Line("TMDB", if (TMDB.hasKey) "Chiave presente" else "Chiave mancante: inviala dal Mac")
+                    Line("IA (Gemini)", if (AI.hasKey) "Chiave presente" else "Nessuna chiave")
+                    Line("OMDb", if (EttyFlixApp.prefs.getString("omdb_api_key", "").isNullOrEmpty()) "Nessuna chiave" else "Chiave presente")
                 }
-                if (serverStatus.isNotEmpty()) Text(serverStatus, color = C.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp).privacyBlur())
+                Section("Media server") {
+                    Line("Server", Store.server?.let { "${it.name} · ${it.url.substringAfter("://").substringBefore("/")}" } ?: "Nessun server", blur = true)
+                    if (Store.server != null) {
+                        Spacer(Modifier.height(10.dp))
+                        PillButton("Verifica server") { scope.launch { serverStatus = "Verifico…"; serverStatus = Jellyfin.check() } }
+                    }
+                    if (serverStatus.isNotEmpty()) Text(serverStatus, color = C.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp).privacyBlur())
+                }
+            }
+            "tv" -> Section("TV in diretta") {
+                Line("Playlist", LiveTV.provider?.let { "${it.name} · ${LiveTV.channels.size} canali · guida per ${LiveTV.guide.size} canali" } ?: "Nessuna playlist")
+                if (LiveTV.provider != null) {
+                    Spacer(Modifier.height(10.dp))
+                    PillButton(if (LiveTV.loading) "Aggiorno…" else "Aggiorna canali e guida") { scope.launch { LiveTV.refresh() } }
+                }
                 if (LiveTV.status.isNotEmpty()) Text(LiveTV.status, color = C.faint, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
             }
-        }
-        item {
-            Section("Profili") {
-                Text("Profilo attivo: ${Profiles.current.name}", color = C.dim, fontSize = 14.sp)
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PillButton("Cambia profilo") { Profiles.chosen = false }
-                    PillButton("Aggiungi profilo") { renaming = true }
-                }
+            "ricevi" -> Section("Ricevi configurazione dal Mac") {
+                Text("Sul Mac apri EttyFlix › Impostazioni › Invia ad altri dispositivi e scrivi questo codice. Mac e Fire TV devono essere sulla stessa rete.",
+                    color = C.dim, fontSize = 14.sp)
+                Spacer(Modifier.height(12.dp))
+                Text(ConfigReceiver.code, color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                Text(ConfigReceiver.address, color = C.faint, fontSize = 13.sp)
+                if (ConfigReceiver.message.isNotEmpty()) Text(ConfigReceiver.message, color = C.accent, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
             }
-        }
-        item {
-            Text("EttyFlix per Fire TV · versione " + runCatching {
-                EttyFlixApp.ctx.packageManager.getPackageInfo(EttyFlixApp.ctx.packageName, 0).versionName
-            }.getOrDefault(""), color = C.faint, fontSize = 12.sp)
+            "avvio" -> Section("Avvio automatico") {
+                var auto by remember { mutableStateOf(com.lorenzo.ettyflix.AutoStart.enabled) }
+                val ok = com.lorenzo.ettyflix.AutoStart.permitted(EttyFlixApp.ctx)
+                PillButton((if (auto) "✓ " else "") + "Apri EttyFlix quando accendi la TV", primary = auto) {
+                    auto = !auto; com.lorenzo.ettyflix.AutoStart.enabled = auto
+                }
+                Text(
+                    if (ok) "Permesso attivo: EttyFlix si apre da sola quando la Fire Stick si accende o si riavvia."
+                    else "Manca il permesso \"mostra sopra le altre app\": si dà una volta dal Mac (vedi le istruzioni che ti ho dato). " +
+                        "Senza, EttyFlix si apre da sola solo dopo un riavvio, e su alcune versioni nemmeno quello.",
+                    color = if (ok) C.dim else C.accent, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            "privacy" -> Section("Modalità privacy") {
+                PillButton((if (PrivacyBlur.on) "✓ " else "") + "Sfoca i nomi delle fonti e degli addon", primary = PrivacyBlur.on) {
+                    PrivacyBlur.set(!PrivacyBlur.on)
+                }
+                Text("Per fare foto o video da mandare ad altri: i nomi restano al loro posto ma non si leggono.",
+                    color = C.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            }
         }
     }
     if (renaming) NameDialog("Nuovo profilo", "") { n -> if (n != null) Profiles.add(n); renaming = false }
+}
+
+/** Riga di scelte a pillole (scorre di lato se sono tante). */
+@Composable
+private fun Choices(label: String, list: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
+    Text(label, color = C.dim, fontSize = 14.sp)
+    Spacer(Modifier.height(8.dp))
+    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(vertical = 4.dp)) {
+        items(list.size) { i ->
+            val (id, title) = list[i]
+            PillButton((if (current == id) "✓ " else "") + title, primary = current == id) { pick(id) }
+        }
+    }
+    Spacer(Modifier.height(14.dp))
 }
 
 @Composable
