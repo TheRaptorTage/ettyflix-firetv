@@ -14,7 +14,9 @@ android {
         minSdk = 25
         targetSdk = 34
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        // NUMERO DI VERSIONE DI ETTYFLIX: uguale a AppVersion.number nelle app Apple (AppVersion.swift).
+        // Aumentarlo di 0.01 a ogni consegna (1.42 → 1.43 …). versionCode resta il numero di compilazione.
+        versionName = "1.42"
     }
 
     signingConfigs {

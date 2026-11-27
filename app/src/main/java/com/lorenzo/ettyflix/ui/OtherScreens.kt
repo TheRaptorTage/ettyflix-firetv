@@ -590,10 +590,10 @@ private fun Line(label: String, value: String) {
 }
 
 
-/** "Versione 1.0.57 · aggiornata il 26 novembre 2026 alle 22:40" (numero = compilazione su GitHub). */
+/** "Versione 1.42 · installata il 27 novembre 2026 alle 16:40" (numero uguale su tutti i dispositivi). */
 fun appVersionLabel(): String = runCatching {
     val ctx = com.lorenzo.ettyflix.EttyFlixApp.ctx
     val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
     val f = java.text.SimpleDateFormat("d MMMM yyyy 'alle' HH:mm", java.util.Locale.ITALIAN)
-    "Versione ${pi.versionName} · aggiornata il ${f.format(java.util.Date(pi.lastUpdateTime))}"
+    "Versione ${pi.versionName} · installata il ${f.format(java.util.Date(pi.lastUpdateTime))}"
 }.getOrDefault("Versione sconosciuta")
