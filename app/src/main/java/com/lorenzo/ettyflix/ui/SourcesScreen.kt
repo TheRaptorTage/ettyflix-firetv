@@ -60,6 +60,7 @@ fun SourcesScreen(req: PlayRequest) {
     var searching by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf("") }
     var run by remember { mutableIntStateOf(0) }
+    var showAll by remember { mutableStateOf(false) }   // senza: al massimo 15 fonti, poche per ogni qualità
     val firstFocus = remember { FocusRequester() }
     val backFocus = remember { FocusRequester() }
 
@@ -82,9 +83,8 @@ fun SourcesScreen(req: PlayRequest) {
         runCatching { if (sources.isNotEmpty()) firstFocus.requestFocus() else backFocus.requestFocus() }
     }
 
-    fun choose(i: Int) {
+    fun choose(chosen: StreamSource) {
         val usable = sources.filter { !it.isError && it.url != null }
-        val chosen = sources[i]
         val idx = usable.indexOf(chosen).coerceAtLeast(0)
         Nav.replaceTop(Screen.Player(req, usable.map { it.toPlayer() }, idx))
     }
@@ -111,8 +111,12 @@ fun SourcesScreen(req: PlayRequest) {
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp)) {
-                    itemsIndexed(sources, key = { i, s -> s.id + i }) { i, s ->
-                        SourceRow(s, req.runtime, if (i == 0) Modifier.focusRequester(firstFocus) else Modifier) { if (!s.isError) choose(i) }
+                    val visible = if (showAll) sources else Jellyfin.curated(sources)
+                    itemsIndexed(visible, key = { i, s -> s.id + i }) { i, s ->
+                        SourceRow(s, req.runtime, if (i == 0) Modifier.focusRequester(firstFocus) else Modifier) { if (!s.isError) choose(s) }
+                    }
+                    if (sources.size > 15) item {
+                        PillButton(if (showAll) "Mostra solo le migliori" else "Mostra tutte le fonti (${sources.size})") { showAll = !showAll }
                     }
                     if (searching) item {
                         Text("Cerco altre sorgenti…", color = C.faint, fontSize = 13.sp, modifier = Modifier.padding(8.dp))

@@ -386,6 +386,26 @@ object Jellyfin {
     }
 
     /** Ordine come in Strand: italiano, pronta subito, risoluzione, HDR, DV, release, dimensione. */
+    /** Le fonti da mostrare (massimo 15): poche per ogni qualità. Le altre restano (riserva, "Mostra tutte"). */
+    fun curated(sorted: List<StreamSource>, limit: Int = 15): List<StreamSource> {
+        if (sorted.size <= limit) return sorted
+        fun bucket(s: StreamSource): Int {
+            val h = s.effectiveHeight
+            return when {
+                h >= 2160 -> if (s.isHDR || s.isDolbyVision) 0 else 1
+                h >= 1080 -> 2
+                h >= 720 -> 3
+                else -> 4
+            }
+        }
+        val quota = intArrayOf(3, 3, 4, 3, 2)   // 4K HDR/DV · 4K · 1080p · 720p · il resto
+        val used = IntArray(5)
+        val keep = LinkedHashSet<StreamSource>()
+        for (s in sorted) { val b = bucket(s); if (used[b] < quota[b]) { used[b]++; keep.add(s) } }
+        for (s in sorted) { if (keep.size >= limit) break; keep.add(s) }
+        return sorted.filter { it in keep }
+    }
+
     fun sorted(input: List<StreamSource>): List<StreamSource> {
         // Lo stesso file arriva da più addon: se uno sa codec audio e canali e gli altri no, li completo.
         val list = input.map { s ->
