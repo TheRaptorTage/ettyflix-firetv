@@ -465,6 +465,15 @@ fun SettingsScreen() {
             }
         }
         item {
+            Section("Privacy") {
+                PillButton((if (PrivacyBlur.on) "✓ " else "") + "Sfoca i nomi delle fonti e degli addon", primary = PrivacyBlur.on) {
+                    PrivacyBlur.set(!PrivacyBlur.on)
+                }
+                Text("Per fare foto o video da mandare ad altri: i nomi restano al loro posto ma non si leggono.",
+                    color = C.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        item {
             Section("Decorazioni e vetro") {
                 @Composable fun choices(label: String, list: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
                     Text(label, color = C.dim, fontSize = 14.sp)
@@ -542,14 +551,14 @@ fun SettingsScreen() {
                 Line("TMDB", if (TMDB.hasKey) "Chiave presente" else "Chiave mancante: inviala dal Mac")
                 Line("IA (Gemini)", if (AI.hasKey) "Chiave presente" else "Nessuna chiave")
                 Line("OMDb", if (EttyFlixApp.prefs.getString("omdb_api_key", "").isNullOrEmpty()) "Nessuna chiave" else "Chiave presente")
-                Line("Media server", Store.server?.let { "${it.name} · ${it.url.substringAfter("://").substringBefore("/")}" } ?: "Nessun server")
+                Line("Media server", Store.server?.let { "${it.name} · ${it.url.substringAfter("://").substringBefore("/")}" } ?: "Nessun server", blur = true)
                 Line("TV in diretta", LiveTV.provider?.let { "${it.name} · ${LiveTV.channels.size} canali · guida per ${LiveTV.guide.size} canali" } ?: "Nessuna playlist")
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (Store.server != null) PillButton("Verifica server") { scope.launch { serverStatus = "Verifico…"; serverStatus = Jellyfin.check() } }
                     if (LiveTV.provider != null) PillButton(if (LiveTV.loading) "Aggiorno…" else "Aggiorna canali e guida") { scope.launch { LiveTV.refresh() } }
                 }
-                if (serverStatus.isNotEmpty()) Text(serverStatus, color = C.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                if (serverStatus.isNotEmpty()) Text(serverStatus, color = C.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp).privacyBlur())
                 if (LiveTV.status.isNotEmpty()) Text(LiveTV.status, color = C.faint, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
@@ -582,10 +591,10 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Line(label: String, value: String) {
+private fun Line(label: String, value: String, blur: Boolean = false) {
     Row(Modifier.padding(vertical = 3.dp)) {
         Text(label, color = C.faint, fontSize = 14.sp, modifier = Modifier.width(150.dp))
-        Text(value, color = C.dim, fontSize = 14.sp)
+        Text(value, color = C.dim, fontSize = 14.sp, modifier = if (blur) Modifier.privacyBlur() else Modifier)
     }
 }
 

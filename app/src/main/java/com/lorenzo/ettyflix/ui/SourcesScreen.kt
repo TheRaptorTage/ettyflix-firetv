@@ -154,7 +154,7 @@ private fun SourceRow(s: StreamSource, runtime: Int?, modifier: Modifier, onClic
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(if (s.isError) "Errore della fonte" else s.addonName, color = Color.White, fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold, maxLines = 1)
+                    fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.privacyBlur())
                 if (s.isReady) Text("  ⚡", color = Color(0xFFFFD60A), fontSize = 14.sp)
                 if (s.isBackup) {
                     Spacer(Modifier.width(8.dp))
