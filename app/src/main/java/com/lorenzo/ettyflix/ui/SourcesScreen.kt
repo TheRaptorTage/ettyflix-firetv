@@ -95,7 +95,11 @@ fun SourcesScreen(req: PlayRequest) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 PillButton("Indietro", Icons.Filled.ArrowBack, Modifier.focusRequester(backFocus)) { Nav.pop() }
                 Text("Seleziona sorgente", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                if (sources.isNotEmpty()) Text("${sources.size} stream", color = C.dim, fontSize = 14.sp)
+                if (sources.isNotEmpty()) {
+                    // il cerchio che gira resta finché arrivano altre fonti, poi rimane solo il numero
+                    if (searching) CircularProgressIndicator(color = C.dim, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                    Text("${(if (showAll) sources else Jellyfin.curated(sources)).size} fonti", color = C.dim, fontSize = 14.sp)
+                }
                 PillButton(if (searching && run > 0) "Cerco…" else "Cerca di nuovo", Icons.Filled.Refresh) {
                     if (!searching) { SourceCache.clear(req.media, req.season, req.episode); sources = emptyList(); message = ""; run++ }
                 }
